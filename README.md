@@ -1,19 +1,8 @@
-<div align="center">
-
-```
-██╗          ██╗
-╚██╗        ██╔╝
- ╚██╗      ██╔╝
-  ╚██╗    ██╔╝
-   ╚██╗  ██╔╝
-    ╚██╗██╔╝
-     ╚███╔╝
-      ╚══╝
-```
-
-*v is for vibing*
-
-</div>
+<p align="center">
+  <img src="assets/logo.svg" width="200" alt="v">
+  <br>
+  <em>v is for vibing</em>
+</p>
 
 `v` is a terminal tool for coding together with an AI agent: you and the agent take turns editing the same code.
 

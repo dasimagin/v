@@ -6,76 +6,43 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
-// One Dark Pro Darker palette.
+type mode int
+
 const (
-	colBg     = "#23272e"
-	colFg     = "#abb2bf"
-	colMuted  = "#7f848e"
-	colGutter = "#495162"
-	colRed    = "#e06c75"
-	colBlue   = "#61afef"
-	colPurple = "#c678dd"
+	modeSplash mode = iota // until the first input
+	modeChat
+	modeView
+	modeBrowse
 )
-
-// logo is a pseudo-3D "V": blocks are the face, box-drawing lines the shadow.
-var logo = []string{
-	"██╗          ██╗",
-	"╚██╗        ██╔╝",
-	" ╚██╗      ██╔╝ ",
-	"  ╚██╗    ██╔╝  ",
-	"   ╚██╗  ██╔╝   ",
-	"    ╚██╗██╔╝    ",
-	"     ╚███╔╝     ",
-	"      ╚══╝      ",
-}
-
-var taglines = []string{
-	"Vibing time...",
-	"Code & coffee...",
-	"Let's deploy this shit...",
-	"Works on my machine...",
-	"It compiles. Ship it...",
-	"Deploy on Friday, what could go wrong...",
-	"It's not a bug, it's a feature...",
-	"Senior Stack Overflow engineer...",
-	"Have you tried turning it off and on again?",
-	"Vibes > specs...",
-	"If it works, don't touch it...",
-	"A hack, but a reliable one...",
-	"Works in my venv...",
-	"One typo, 400 lines of template errors...",
-	"Undefined behavior, defined vibes...",
-	// Code stays as typed.
-	"git push --force and pray",
-	"// TODO: write tests",
-	"import antigravity",
-	"if err != nil { return err }",
-	"Segmentation fault (core dumped)",
-}
 
 type model struct {
-	w, h    int
-	omni    textinput.Model
-	tagline int
-	status  string // transient error; replaces the hint until the next Enter
-	where   string // "branch · ~/path" shown on the right of the status line
-}
+	w, h      int
+	mode      mode
+	omni      textinput.Model
+	menu      *menu
+	dismissed string // omnibox value the menu was closed with Esc for
+	tagline   int
+	status    string // transient error; replaces the hint until the next Enter
+	where     string // "branch · ~/path" on the right of the status line
 
-var (
-	bg        = lipgloss.NewStyle().Background(lipgloss.Color(colBg))
-	tagStyle  = bg.Foreground(lipgloss.Color(colMuted)).Italic(true)
-	sepStyle  = bg.Foreground(lipgloss.Color(colGutter))
-	hintStyle = bg.Foreground(lipgloss.Color(colMuted))
-	errStyle  = bg.Foreground(lipgloss.Color(colRed))
-)
+	doc       *Doc
+	top, left int
+	browser   *Browser
+	log       []message
+	stack     []screen // screens to return to with Esc
+
+	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
+	exitSeq int    // invalidates stale disarm ticks
+}
 
 func newModel() model {
 	ti := textinput.New()
@@ -83,7 +50,7 @@ func newModel() model {
 	ti.PromptStyle = bg.Foreground(lipgloss.Color(colBlue))
 	ti.TextStyle = bg.Foreground(lipgloss.Color(colFg))
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colFg))
-	ti.Placeholder = "/q to quit"
+	ti.Placeholder = "type / for commands"
 	ti.PlaceholderStyle = hintStyle
 	ti.Focus()
 	return model{omni: ti, tagline: rand.IntN(len(taglines)), where: where()}
@@ -92,9 +59,7 @@ func newModel() model {
 // where describes the working directory: git branch (if any) and path with ~.
 func where() string {
 	dir, _ := os.Getwd()
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(dir, home) {
-		dir = "~" + dir[len(home):]
-	}
+	dir = tildify(dir)
 	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if branch := strings.TrimSpace(string(out)); err == nil && branch != "" {
 		return branch + " · " + dir
@@ -102,7 +67,34 @@ func where() string {
 	return dir
 }
 
+func (m *model) setErr(s string) { m.status = s }
+
+// exitWindow is how long a second Ctrl-C or Ctrl-D still quits.
+const exitWindow = time.Second
+
+type disarmMsg int
+
+var keyNames = map[string]string{"ctrl+c": "Ctrl-C", "ctrl+d": "Ctrl-D"}
+
 func (m model) Init() tea.Cmd { return textinput.Blink }
+
+// footerRows is the height under the omnibox: the menu, or the status line.
+func (m model) footerRows() int {
+	if m.menu != nil {
+		return min(len(m.menu.items), menuRows)
+	}
+	return 1
+}
+
+// bodyRows is the height of the main area: everything except the header
+// (view and browse modes), the two lines around the omnibox, and the footer.
+func (m model) bodyRows() int {
+	rows := m.h - 3 - m.footerRows()
+	if m.mode == modeView || m.mode == modeBrowse {
+		rows--
+	}
+	return max(rows, 1)
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -110,113 +102,252 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 		m.omni.Width = m.w - 4
 		return m, nil
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "enter":
-			v := strings.TrimSpace(m.omni.Value())
-			m.omni.SetValue("")
-			switch v {
-			case "/q", "/quit":
-				return m, tea.Quit
-			case "":
-				m.status = ""
-			default:
-				m.status = "only /q works for now"
-			}
-			return m, nil
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.bodyKey("up")
+		case tea.MouseButtonWheelDown:
+			m.bodyKey("down")
 		}
+		return m, nil
+	case tea.KeyMsg:
+		return m.key(msg)
+	case disarmMsg:
+		if int(msg) == m.exitSeq {
+			m.exitKey = ""
+		}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.omni, cmd = m.omni.Update(msg)
 	return m, cmd
 }
 
-// gradient blends a into b; colors are "#rrggbb", t is in [0, 1].
-func gradient(a, b string, t float64) lipgloss.Color {
-	x, _ := strconv.ParseUint(a[1:], 16, 32)
-	y, _ := strconv.ParseUint(b[1:], 16, 32)
-	var out uint64
-	for shift := 16; shift >= 0; shift -= 8 {
-		ca, cb := float64(x>>shift&0xff), float64(y>>shift&0xff)
-		out |= uint64(ca+(cb-ca)*t) << shift
-	}
-	return lipgloss.Color(fmt.Sprintf("#%06x", out))
-}
-
-// renderLogo colors the face blocks with a blue→purple gradient and the shadow darker.
-func renderLogo() []string {
-	out := make([]string, len(logo))
-	for i, line := range logo {
-		t := float64(i) / float64(len(logo)-1)
-		face := bg.Foreground(gradient(colBlue, colPurple, t)).Bold(true)
-		shadow := bg.Foreground(gradient("#3b5a7a", "#5a3d6b", t))
-		var b strings.Builder
-		for _, r := range line {
-			s := string(r)
-			switch r {
-			case '█':
-				b.WriteString(face.Render(s))
-			case ' ':
-				b.WriteString(bg.Render(s))
-			default:
-				b.WriteString(shadow.Render(s))
-			}
+func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k := msg.String()
+	switch {
+	case k == "ctrl+c" && (m.omni.Value() != "" || m.menu != nil):
+		// Like Claude Code: Ctrl-C first clears the input.
+		m.omni.SetValue("")
+		m.menu, m.exitKey = nil, ""
+		return m, nil
+	case k == "ctrl+c" || (k == "ctrl+d" && m.omni.Value() == ""):
+		if m.exitKey == k {
+			return m, tea.Quit
 		}
-		out[i] = b.String()
+		m.exitKey = k
+		m.exitSeq++
+		seq := m.exitSeq
+		return m, tea.Tick(exitWindow, func(time.Time) tea.Msg { return disarmMsg(seq) })
 	}
-	return out
+	m.exitKey = ""
+	if m.menu != nil {
+		switch k {
+		case "tab", "down":
+			m.moveSel(1)
+			return m, nil
+		case "shift+tab", "up":
+			m.moveSel(-1)
+			return m, nil
+		case "enter":
+			cmd := m.accept()
+			return m, cmd
+		case "esc":
+			m.menu, m.dismissed = nil, m.omni.Value()
+			return m, nil
+		}
+	}
+	switch k {
+	case "tab":
+		m.tab(1)
+		return m, nil
+	case "shift+tab":
+		m.tab(-1)
+		return m, nil
+	case "enter":
+		if m.omni.Value() == "" {
+			m.bodyKey(k)
+			return m, nil
+		}
+		v := m.omni.Value()
+		m.omni.SetValue("")
+		m.status, m.dismissed = "", ""
+		return m, m.run(v)
+	}
+	// With an empty omnibox, navigation keys drive the main area.
+	if m.omni.Value() == "" && m.bodyKey(k) {
+		return m, nil
+	}
+	before := m.omni.Value()
+	var cmd tea.Cmd
+	m.omni, cmd = m.omni.Update(msg)
+	if m.omni.Value() != before {
+		m.suggest(false)
+	}
+	return m, cmd
 }
 
-// center pads a rendered line to the screen width.
-func (m model) center(s string) string {
-	w := lipgloss.Width(s)
-	left := max((m.w-w)/2, 0)
-	return bg.Render(strings.Repeat(" ", left)) + s + bg.Render(strings.Repeat(" ", max(m.w-left-w, 0)))
+// bodyKey handles a navigation key in the main area; it reports whether the key was used.
+func (m *model) bodyKey(k string) bool {
+	rows := m.bodyRows()
+	switch m.mode {
+	case modeSplash:
+		if k == "esc" {
+			m.mode = modeChat
+			return true
+		}
+	case modeBrowse:
+		b := m.browser
+		var err error
+		switch k {
+		case "up":
+			b.Move(-1, rows)
+		case "down":
+			b.Move(1, rows)
+		case "pgup":
+			b.Move(-rows+1, rows)
+		case "pgdown":
+			b.Move(rows-1, rows)
+		case "home":
+			b.Move(-1<<30, rows)
+		case "end":
+			b.Move(1<<30, rows)
+		case "left", "backspace":
+			err = b.Up()
+		case "right", "enter":
+			var path string
+			if path, err = b.Enter(); err == nil && path != "" {
+				m.openFile(path)
+			}
+		case "esc":
+			m.pop()
+		default:
+			return false
+		}
+		if err != nil {
+			m.setErr(err.Error())
+		}
+		return true
+	case modeView:
+		switch k {
+		case "up":
+			m.scroll(-1, 0)
+		case "down":
+			m.scroll(1, 0)
+		case "pgup":
+			m.scroll(-rows+1, 0)
+		case "pgdown":
+			m.scroll(rows-1, 0)
+		case "left":
+			m.scroll(0, -4)
+		case "right":
+			m.scroll(0, 4)
+		case "home":
+			m.top, m.left = 0, 0
+		case "end":
+			m.scroll(1<<30, 0)
+		case "esc":
+			m.pop()
+		default:
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func (m *model) scroll(dy, dx int) {
+	m.top = min(max(m.top+dy, 0), max(len(m.doc.Lines)-m.bodyRows(), 0))
+	m.left = max(m.left+dx, 0)
 }
 
 func (m model) View() string {
 	if m.w == 0 {
 		return ""
 	}
-	tag := tagStyle.Render(taglines[m.tagline])
-	block := append(renderLogo(), bg.Render(""), tag)
-
-	// Bottom: line, omnibox, line, status. Same frame as Claude Code's input.
-	rows := max(m.h-4, len(block))
-	top := (rows - len(block)) / 2
 	var b strings.Builder
-	for i := 0; i < rows; i++ {
-		line := ""
-		if i >= top && i < top+len(block) {
-			line = block[i-top]
-		}
-		b.WriteString(m.center(line))
+	line := func(s string) {
+		b.WriteString(s)
 		b.WriteByte('\n')
 	}
+	pad := func(s string, style lipgloss.Style) string {
+		return s + style.Render(strings.Repeat(" ", max(m.w-lipgloss.Width(s), 0)))
+	}
 
+	rows := m.bodyRows()
+	switch m.mode {
+	case modeSplash:
+		for _, l := range splash(taglines[m.tagline], m.w, rows) {
+			line(l)
+		}
+	case modeChat:
+		for _, l := range m.renderLog(rows) {
+			line(l)
+		}
+	case modeBrowse:
+		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" "+tildify(m.browser.dir)+"/ ")+
+			mutedHeader.Render(fmt.Sprintf("· %d ", len(m.browser.entries))), headerStyle))
+		for _, l := range m.browser.Render(m.w, rows) {
+			line(l)
+		}
+	case modeView:
+		d := m.doc
+		pos := fmt.Sprintf(" %d/%d ", min(m.top+rows, len(d.Lines)), len(d.Lines))
+		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" "+tildify(d.Path)+" ")+
+			mutedHeader.Render("· "+d.Lang+" ·"+pos), headerStyle))
+		gw := len(fmt.Sprint(len(d.Lines))) + 2
+		for i := 0; i < rows; i++ {
+			if n := m.top + i; n < len(d.Lines) {
+				line(gutterStyle.Render(fmt.Sprintf("%*d ", gw-1, n+1)) + renderLine(d.Lines[n], m.left, m.w-gw))
+			} else {
+				line(bg.Render(strings.Repeat(" ", m.w)))
+			}
+		}
+	}
+
+	// Omnibox between two lines, like Claude Code's input; footer below.
 	sep := sepStyle.Render(strings.Repeat("─", m.w))
-	omni := m.omni.View()
-	b.WriteString(sep + "\n")
-	b.WriteString(omni + bg.Render(strings.Repeat(" ", max(m.w-lipgloss.Width(omni), 0))) + "\n")
-	b.WriteString(sep + "\n")
-
+	line(sep)
+	line(pad(m.omni.View(), bg))
+	line(sep)
+	if m.menu != nil {
+		b.WriteString(strings.Join(m.renderMenu(m.w), "\n"))
+		return b.String()
+	}
 	left, style := " "+m.status, errStyle
-	if m.status == "" {
-		left, style = " v is for vibing · /q is for exit", hintStyle
+	if m.exitKey != "" {
+		left, style = " Press "+keyNames[m.exitKey]+" again to exit", hintStyle
+	} else if m.status == "" {
+		left, style = " "+m.hint(), hintStyle
 	}
 	right := m.where + " "
-	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		right, gap = "", max(m.w-lipgloss.Width(left), 0)
+	if lipgloss.Width(left)+lipgloss.Width(right) >= m.w {
+		right = ""
 	}
+	left = runewidth.Truncate(left, m.w-lipgloss.Width(right), "…")
+	gap := max(m.w-lipgloss.Width(left)-lipgloss.Width(right), 0)
 	b.WriteString(style.Render(left) + bg.Render(strings.Repeat(" ", gap)) + hintStyle.Render(right))
 	return b.String()
 }
 
+func (m model) hint() string {
+	switch m.mode {
+	case modeBrowse:
+		return "↑↓ select · enter open · ← parent · esc back"
+	case modeView:
+		return "↑↓ ←→ scroll · esc back · / commands"
+	case modeChat:
+		return "/ commands · /reset new session"
+	}
+	return "v is for vibing · /q is for exit"
+}
+
 func main() {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	m := newModel()
+	if len(os.Args) > 1 {
+		m.cmdOpen(os.Args[1])
+	}
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

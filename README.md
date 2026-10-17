@@ -17,11 +17,17 @@
 
 `v` is a terminal tool for coding together with an AI agent: you and the agent take turns editing the same code.
 
-Right now it is a splash screen. The plan:
+What works now:
 
-- an editor with syntax highlighting (One Dark Pro Darker);
+- an omnibox with commands: type `/` for a menu that filters as you type; Tab, Shift-Tab and arrows move the selection, Enter picks it;
+- `/open [path]` opens a file with syntax highlighting (One Dark Pro Darker) or lists a directory; without a path it lists the working directory; paths complete on Tab;
+- screens stack up: Esc goes back one screen, down to the chat;
+- `/reset` starts over with a fresh splash; `/q`, `/quit`, or Ctrl-D / Ctrl-C twice exits.
+
+The plan:
+
+- editing files in place;
 - diff against git `HEAD`: unified and side-by-side;
-- an omnibox for commands and prompts;
 - an agent on top of Claude Code that uses your Claude subscription login, where every edit it proposes can be reviewed and changed before it lands.
 
 ## Build
@@ -40,4 +46,4 @@ Or install into `$GOPATH/bin`:
 go install github.com/dasimagin/v@latest
 ```
 
-Quit with `/q` or `Ctrl-C`.
+Quit with `/q` or press `Ctrl-D` twice.

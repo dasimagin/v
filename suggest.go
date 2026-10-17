@@ -153,12 +153,6 @@ func commonPrefix(items []item) string {
 	return p
 }
 
-var (
-	menuSel  = bg.Foreground(lipgloss.Color(colBlue)).Bold(true)
-	menuItem = bg.Foreground(lipgloss.Color(colFg))
-	menuDir  = bg.Foreground(lipgloss.Color(colBlue))
-)
-
 // renderMenu draws up to menuRows items, scrolled to keep the selection visible.
 func (m *model) renderMenu(width int) []string {
 	mu := m.menu
@@ -171,12 +165,12 @@ func (m *model) renderMenu(width int) []string {
 	out := make([]string, 0, n)
 	for i := top; i < top+n; i++ {
 		it := mu.items[i]
-		mark, st := "  ", menuItem
+		mark, st := "  ", fgStyle
 		if mu.args && strings.HasSuffix(it.value, "/") {
-			st = menuDir
+			st = accentStyle
 		}
 		if i == mu.sel {
-			mark, st = "› ", menuSel
+			mark, st = "› ", accentStyle.Bold(true)
 		}
 		line := st.Render(" "+mark+it.label+strings.Repeat(" ", labelW-lipgloss.Width(it.label))) +
 			hintStyle.Render("   "+it.desc)

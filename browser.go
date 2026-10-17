@@ -22,12 +22,6 @@ type Browser struct {
 	sel, top int
 }
 
-var (
-	dirStyle    = bg.Foreground(lipgloss.Color(colBlue))
-	fileStyle   = bg.Foreground(lipgloss.Color(colFg))
-	hiddenStyle = bg.Foreground(lipgloss.Color(colMuted))
-)
-
 // NewBrowser lists dir with the entry named sel (if any) selected.
 func NewBrowser(dir, sel string) (*Browser, error) {
 	b := &Browser{}
@@ -110,19 +104,19 @@ func (b *Browser) Render(width, rows int) []string {
 	out := make([]string, 0, rows)
 	for i := b.top; i < len(b.entries) && len(out) < rows; i++ {
 		e := b.entries[i]
-		name, st := e.name, fileStyle
+		name, st := e.name, fgStyle
 		switch {
 		case e.isDir:
-			name, st = name+"/", dirStyle
+			name, st = name+"/", accentStyle
 		case strings.HasPrefix(name, "."):
-			st = hiddenStyle
+			st = hintStyle
 		}
 		icon := "  "
 		if e.isDir {
 			icon = "▸ "
 		}
 		if i == b.sel {
-			st = st.Background(lipgloss.Color(colSel)).Bold(true)
+			st = st.Background(lipgloss.Color(cur.Sel)).Bold(true)
 		}
 		text := runewidth.Truncate("  "+icon+name, width, "…")
 		out = append(out, st.Render(text+strings.Repeat(" ", max(width-lipgloss.Width(text), 0))))

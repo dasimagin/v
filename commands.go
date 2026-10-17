@@ -31,6 +31,11 @@ var commands = []*Command{
 		Run:      (*model).cmdOpen,
 	},
 	{
+		Name: "config",
+		Desc: "Settings",
+		Run:  (*model).cmdConfig,
+	},
+	{
 		Name: "reset",
 		Desc: "Start a new session",
 		Run:  (*model).cmdReset,

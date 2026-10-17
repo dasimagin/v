@@ -9,45 +9,13 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
-var theme = chroma.MustNewStyle("one-dark-pro-darker", chroma.StyleEntries{
-	chroma.Background:          colFg + " bg:" + colBg,
-	chroma.Comment:             "italic " + colMuted,
-	chroma.CommentPreproc:      colPurple,
-	chroma.Keyword:             colPurple,
-	chroma.KeywordConstant:     colOrange,
-	chroma.KeywordType:         colYellow,
-	chroma.Name:                colFg,
-	chroma.NameVariable:        colRed,
-	chroma.NameFunction:        colBlue,
-	chroma.NameBuiltin:         colCyan,
-	chroma.NameClass:           colYellow,
-	chroma.NameNamespace:       colYellow,
-	chroma.NameConstant:        colOrange,
-	chroma.NameDecorator:       colBlue,
-	chroma.NameTag:             colRed,
-	chroma.NameAttribute:       colOrange,
-	chroma.NameProperty:        colRed,
-	chroma.LiteralString:       colGreen,
-	chroma.LiteralStringEscape: colCyan,
-	chroma.LiteralNumber:       colOrange,
-	chroma.Operator:            colCyan,
-	chroma.Punctuation:         colFg,
-	chroma.GenericInserted:     colGreen,
-	chroma.GenericDeleted:      colRed,
-	chroma.GenericHeading:      "bold " + colBlue,
-	chroma.GenericSubheading:   colBlue,
-	chroma.GenericEmph:         "italic",
-	chroma.GenericStrong:       "bold",
-})
-
-// seg is a run of text drawn with one style.
+// seg is a run of text of one token type; its style comes from the active theme.
 type seg struct {
-	text  string
-	style lipgloss.Style
+	text string
+	tok  chroma.TokenType
 }
 
 type Doc struct {
@@ -64,10 +32,20 @@ func LoadDoc(path string) (*Doc, error) {
 	if !utf8.Valid(b) || bytes.IndexByte(b, 0) >= 0 {
 		return nil, errors.New("binary file")
 	}
-	src := strings.ReplaceAll(string(b), "\r\n", "\n")
+	lang, lines, err := highlight(path, string(b))
+	if err != nil {
+		return nil, err
+	}
+	return &Doc{Path: path, Lang: lang, Lines: lines}, nil
+}
+
+// highlight splits src into lines of tokens. The lexer is picked by file
+// name, then by content; it returns the language name.
+func highlight(name, src string) (string, [][]seg, error) {
+	src = strings.ReplaceAll(src, "\r\n", "\n")
 	src = strings.ReplaceAll(src, "\t", "    ")
 
-	lexer := lexers.Match(path)
+	lexer := lexers.Match(name)
 	if lexer == nil {
 		lexer = lexers.Analyse(src)
 	}
@@ -77,18 +55,17 @@ func LoadDoc(path string) (*Doc, error) {
 	lexer = chroma.Coalesce(lexer)
 	it, err := lexer.Tokenise(nil, src)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	lines := [][]seg{nil}
 	for tok := it(); tok != chroma.EOF; tok = it() {
-		st := styleFor(tok.Type)
 		for i, part := range strings.Split(tok.Value, "\n") {
 			if i > 0 {
 				lines = append(lines, nil)
 			}
 			if part != "" {
-				lines[len(lines)-1] = append(lines[len(lines)-1], seg{part, st})
+				lines[len(lines)-1] = append(lines[len(lines)-1], seg{part, tok.Type})
 			}
 		}
 	}
@@ -99,28 +76,7 @@ func LoadDoc(path string) (*Doc, error) {
 	if lang == "fallback" {
 		lang = "plain text"
 	}
-	return &Doc{Path: path, Lang: lang, Lines: lines}, nil
-}
-
-var styleCache = map[chroma.TokenType]lipgloss.Style{}
-
-func styleFor(t chroma.TokenType) lipgloss.Style {
-	if s, ok := styleCache[t]; ok {
-		return s
-	}
-	e := theme.Get(t)
-	s := lipgloss.NewStyle().Background(lipgloss.Color(colBg)).Foreground(lipgloss.Color(colFg))
-	if e.Colour.IsSet() {
-		s = s.Foreground(lipgloss.Color(e.Colour.String()))
-	}
-	if e.Bold == chroma.Yes {
-		s = s.Bold(true)
-	}
-	if e.Italic == chroma.Yes {
-		s = s.Italic(true)
-	}
-	styleCache[t] = s
-	return s
+	return lang, lines, nil
 }
 
 // renderLine draws columns [left, left+width) of a line, padded to width.
@@ -138,7 +94,7 @@ func renderLine(segs []seg, left, width int) string {
 			col += w
 		}
 		if chunk.Len() > 0 {
-			sb.WriteString(s.style.Render(chunk.String()))
+			sb.WriteString(styleFor(s.tok).Render(chunk.String()))
 		}
 		if used >= width {
 			break

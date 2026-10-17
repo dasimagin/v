@@ -44,8 +44,6 @@ var taglines = []string{
 	"Segmentation fault (core dumped)",
 }
 
-var tagStyle = bg.Foreground(lipgloss.Color(colMuted)).Italic(true)
-
 // gradient blends a into b; colors are "#rrggbb", t is in [0, 1].
 func gradient(a, b string, t float64) lipgloss.Color {
 	x, _ := strconv.ParseUint(a[1:], 16, 32)
@@ -58,13 +56,14 @@ func gradient(a, b string, t float64) lipgloss.Color {
 	return lipgloss.Color(fmt.Sprintf("#%06x", out))
 }
 
-// renderLogo colors the face blocks with a blue→purple gradient and the shadow darker.
+// renderLogo colors the face blocks with the theme accent gradient and the shadow darker.
 func renderLogo() []string {
 	out := make([]string, len(logo))
 	for i, line := range logo {
 		t := float64(i) / float64(len(logo)-1)
-		face := bg.Foreground(gradient(colBlue, colPurple, t)).Bold(true)
-		shadow := bg.Foreground(gradient("#3b5a7a", "#5a3d6b", t))
+		face := bg.Foreground(gradient(cur.Accent, cur.Accent2, t)).Bold(true)
+		// The shadow is the face color sunk halfway into the background.
+		shadow := bg.Foreground(gradient(string(gradient(cur.Accent, cur.Bg, 0.5)), string(gradient(cur.Accent2, cur.Bg, 0.5)), t))
 		var b strings.Builder
 		for _, r := range line {
 			s := string(r)
@@ -84,7 +83,7 @@ func renderLogo() []string {
 
 // splash returns the logo and the tagline, centered in width×rows.
 func splash(tagline string, width, rows int) []string {
-	block := append(renderLogo(), "", tagStyle.Render(tagline))
+	block := append(renderLogo(), "", hintStyle.Italic(true).Render(tagline))
 	top := max((rows-len(block))/2, 0)
 	out := make([]string, rows)
 	for i := range out {

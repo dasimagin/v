@@ -12,12 +12,6 @@ type message struct {
 	text string
 }
 
-var (
-	userStyle = bg.Foreground(lipgloss.Color(colFg))
-	noteStyle = bg.Foreground(lipgloss.Color(colMuted))
-	markStyle = bg.Foreground(lipgloss.Color(colBlue))
-)
-
 // note adds a message from v to the chat log.
 func (m *model) note(text string) { m.log = append(m.log, message{text: text}) }
 
@@ -25,9 +19,9 @@ func (m *model) note(text string) { m.log = append(m.log, message{text: text}) }
 func (m *model) renderLog(rows int) []string {
 	var lines []string
 	for i, msg := range m.log {
-		st, mark := noteStyle, bg.Render("  ")
+		st, mark := hintStyle, bg.Render("  ")
 		if msg.user {
-			st, mark = userStyle, markStyle.Render("› ")
+			st, mark = fgStyle, accentStyle.Render("› ")
 			if i > 0 {
 				lines = append(lines, "")
 			}

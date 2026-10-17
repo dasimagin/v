@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ const (
 	modeChat
 	modeView
 	modeBrowse
+	modeConfig
 )
 
 type model struct {
@@ -38,6 +40,8 @@ type model struct {
 	top, left int
 	browser   *Browser
 	log       []message
+	settings  Settings
+	cfg       *configScreen
 	stack     []screen // screens to return to with Esc
 
 	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
@@ -47,13 +51,19 @@ type model struct {
 func newModel() model {
 	ti := textinput.New()
 	ti.Prompt = "› "
-	ti.PromptStyle = bg.Foreground(lipgloss.Color(colBlue))
-	ti.TextStyle = bg.Foreground(lipgloss.Color(colFg))
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colFg))
 	ti.Placeholder = "type / for commands"
-	ti.PlaceholderStyle = hintStyle
 	ti.Focus()
-	return model{omni: ti, tagline: rand.IntN(len(taglines)), where: where()}
+	m := model{omni: ti, tagline: rand.IntN(len(taglines)), where: where()}
+	m.styleOmni()
+	return m
+}
+
+// styleOmni applies the active theme to the omnibox.
+func (m *model) styleOmni() {
+	m.omni.PromptStyle = accentStyle
+	m.omni.TextStyle = fgStyle
+	m.omni.PlaceholderStyle = hintStyle
+	m.omni.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(cur.Fg))
 }
 
 // where describes the working directory: git branch (if any) and path with ~.
@@ -90,7 +100,7 @@ func (m model) footerRows() int {
 // (view and browse modes), the two lines around the omnibox, and the footer.
 func (m model) bodyRows() int {
 	rows := m.h - 3 - m.footerRows()
-	if m.mode == modeView || m.mode == modeBrowse {
+	if m.mode == modeView || m.mode == modeBrowse || m.mode == modeConfig {
 		rows--
 	}
 	return max(rows, 1)
@@ -196,6 +206,8 @@ func (m *model) bodyKey(k string) bool {
 			m.mode = modeChat
 			return true
 		}
+	case modeConfig:
+		return m.configKey(k)
 	case modeBrowse:
 		b := m.browser
 		var err error
@@ -290,6 +302,12 @@ func (m model) View() string {
 		for _, l := range m.browser.Render(m.w, rows) {
 			line(l)
 		}
+	case modeConfig:
+		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" settings ")+
+			mutedHeader.Render("· "+tildify(settingsPath())+" "), headerStyle))
+		for _, l := range m.renderConfig(rows) {
+			line(l)
+		}
 	case modeView:
 		d := m.doc
 		pos := fmt.Sprintf(" %d/%d ", min(m.top+rows, len(d.Lines)), len(d.Lines))
@@ -338,12 +356,30 @@ func (m model) hint() string {
 		return "↑↓ ←→ scroll · esc back · / commands"
 	case modeChat:
 		return "/ commands · /reset new session"
+	case modeConfig:
+		return "↑↓ move · enter choose · esc back"
 	}
 	return "v is for vibing · /q is for exit"
 }
 
 func main() {
+	themeErr := loadThemes(filepath.Join(configDir(), "themes"))
+	s, err := loadSettings()
+	t := findTheme(s.Theme)
+	if t == nil {
+		t = findTheme(defaultTheme)
+	}
+	applyTheme(t)
 	m := newModel()
+	m.settings = s
+	switch {
+	case err != nil:
+		m.setErr("settings: " + err.Error())
+	case findTheme(s.Theme) == nil:
+		m.setErr("settings: unknown theme " + s.Theme)
+	case themeErr != nil:
+		m.setErr(strings.ReplaceAll(themeErr.Error(), "\n", "; "))
+	}
 	if len(os.Args) > 1 {
 		m.cmdOpen(os.Args[1])
 	}

@@ -20,8 +20,9 @@
 What works now:
 
 - an omnibox with commands: type `/` for a menu that filters as you type; Tab, Shift-Tab and arrows move the selection, Enter picks it;
-- `/open [path]` opens a file with syntax highlighting (One Dark Pro Darker) or lists a directory; without a path it lists the working directory; paths complete on Tab;
+- `/open [path]` opens a file with syntax highlighting or lists a directory; without a path it lists the working directory; paths complete on Tab;
 - screens stack up: Esc goes back one screen, down to the chat;
+- `/config` edits `~/.v/settings.json`; for now it picks the color theme. Built-in themes are One Dark Pro (+ Darker), One Light and GitHub Dark/Light; any VS Code theme JSON dropped into `~/.v/themes/` shows up too;
 - `/reset` starts over with a fresh splash; `/q`, `/quit`, or Ctrl-D / Ctrl-C twice exits.
 
 The plan:

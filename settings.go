@@ -1,0 +1,63 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+
+// Settings is the user config in ~/.v/settings.json.
+type Settings struct {
+	Theme string `json:"theme"`
+}
+
+func defaultSettings() Settings {
+	return Settings{Theme: defaultTheme}
+}
+
+// configDir is ~/.v: settings.json and the user's themes/ live there.
+func configDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".v")
+}
+
+func settingsPath() string { return filepath.Join(configDir(), "settings.json") }
+
+// loadSettings reads the config, writing the defaults on first run. On a
+// broken file it returns the defaults and the error, and leaves the file alone.
+func loadSettings() (Settings, error) {
+	s := defaultSettings()
+	b, err := os.ReadFile(settingsPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return s, s.save()
+	}
+	if err != nil {
+		return s, err
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		return defaultSettings(), err
+	}
+	return s, nil
+}
+
+// save writes the config atomically.
+func (s Settings) save() error {
+	path := settingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

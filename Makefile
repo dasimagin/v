@@ -1,12 +1,15 @@
 BIN := v
 
-.PHONY: build run lint fmt clean
+.PHONY: build run test lint fmt clean
 
 build:
 	go build -o $(BIN) .
 
 run: build
 	./$(BIN)
+
+test:
+	go test ./...
 
 lint:
 	golangci-lint run ./...

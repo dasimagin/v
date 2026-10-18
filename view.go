@@ -41,16 +41,26 @@ func (m *model) effectiveMode() viewMode {
 
 func (m *model) unifiedRows() []diffRow {
 	if m.doc.unified == nil {
-		m.doc.unified = unifiedRows(m.doc)
+		m.doc.unified, m.doc.unifiedAt = unifiedRows(m.doc)
 	}
 	return m.doc.unified
 }
 
 func (m *model) splitRows() []diffRow {
 	if m.doc.split == nil {
-		m.doc.split = splitRows(m.doc)
+		m.doc.split, m.doc.splitAt = splitRows(m.doc)
 	}
 	return m.doc.split
+}
+
+// cursorAt is the cursor's display column on working-copy line n (0-based),
+// or -1 when the cursor is not on it or not shown.
+func (m *model) cursorAt(n int) int {
+	e := m.doc.Ed
+	if !e.On || n != e.Cur.Line {
+		return -1
+	}
+	return displayCol(m.doc.Text[n], e.Cur.Col)
 }
 
 // modeLabel is the dropdown button in the top right corner.
@@ -109,6 +119,12 @@ func (m *model) viewClick(x, y int) {
 		}
 		return
 	}
+	if m.viewMenu == nil {
+		if y >= headerRows && y < headerRows+m.bodyRows() {
+			m.clickText(x, y-headerRows)
+		}
+		return
+	}
 	if m.viewMenu != nil {
 		if i := y - headerRows; i >= 0 && i < len(viewModeNames) && x >= m.w-menuWidth()-1 {
 			m.setViewMode(viewMode(i))
@@ -127,6 +143,12 @@ func (m *model) renderView(rows int) []string {
 		title = buttonOpen.Render(" proposed "+d.Review+" ") + bg.Render("  ") + title
 	}
 	info := fmt.Sprintf("%s · %d/%d", d.Lang, min(m.top+rows, total), total)
+	if d.Ed.Dirty {
+		info += " · modified"
+	}
+	if d.Ed.On {
+		info = "editing · " + info
+	}
 	labelStyle := buttonOff
 	switch {
 	case d.Base != nil && m.viewMenu != nil:
@@ -171,7 +193,7 @@ func (m *model) renderFlat(rows int) []string {
 	out := make([]string, rows)
 	for i := range out {
 		if n := m.top + i; n < len(d.Lines) {
-			out[i] = gutterStyle.Render(fmt.Sprintf("%*d ", gw-1, n+1)) + renderLine(d.Lines[n], m.left, m.w-gw)
+			out[i] = gutterStyle.Render(fmt.Sprintf("%*d ", gw-1, n+1)) + renderLineOn(d.Lines[n], m.left, m.w-gw, "", m.cursorAt(n))
 		} else {
 			out[i] = blank(m.w)
 		}
@@ -220,11 +242,11 @@ func (m *model) renderUnified(rows int) []string {
 			s := gutterStyle.Render(strings.Repeat(" ", gw)) + accentStyle.Render(r.head)
 			out[i] = s + blank(m.w-lipgloss.Width(s))
 		case rowCtx:
-			out[i] = gutterStyle.Render(number(r.oldNo, nw)+" "+number(r.left.no, nw)+"   ") + renderLine(r.left.segs, m.left, m.w-gw)
+			out[i] = gutterStyle.Render(number(r.oldNo, nw)+" "+number(r.left.no, nw)+"   ") + renderLineOn(r.left.segs, m.left, m.w-gw, "", m.cursorAt(r.left.no-1))
 		case rowAdd:
-			out[i] = gutterStyle.Render(number(0, nw)+" "+number(r.left.no, nw)+" ") + addSign.Render("+ ") + renderLineOn(r.left.segs, m.left, m.w-gw, addTint)
+			out[i] = gutterStyle.Render(number(0, nw)+" "+number(r.left.no, nw)+" ") + addSign.Render("+ ") + renderLineOn(r.left.segs, m.left, m.w-gw, addTint, m.cursorAt(r.left.no-1))
 		case rowDel:
-			out[i] = gutterStyle.Render(number(r.oldNo, nw)+" "+number(0, nw)+" ") + delSign.Render("- ") + renderLineOn(r.left.segs, m.left, m.w-gw, delTint)
+			out[i] = gutterStyle.Render(number(r.oldNo, nw)+" "+number(0, nw)+" ") + delSign.Render("- ") + renderLineOn(r.left.segs, m.left, m.w-gw, delTint, -1)
 		}
 	}
 	return out
@@ -238,15 +260,20 @@ func (m *model) renderSplit(rows int) []string {
 	nw := len(fmt.Sprint(max(len(m.doc.Lines), len(m.doc.Base.Lines))))
 	lw := (m.w - 1) / 2
 	rw := m.w - 1 - lw
-	half := func(s side, w int) string {
+	// half draws one side; the cursor only goes on the right (working copy).
+	half := func(s side, w int, right bool) string {
 		gw := nw + 3 // "no ± "
+		cursor := -1
+		if right {
+			cursor = m.cursorAt(s.no - 1)
+		}
 		switch s.kind {
 		case rowCtx:
-			return gutterStyle.Render(number(s.no, nw)+"   ") + renderLine(s.segs, m.left, w-gw)
+			return gutterStyle.Render(number(s.no, nw)+"   ") + renderLineOn(s.segs, m.left, w-gw, "", cursor)
 		case rowAdd:
-			return gutterStyle.Render(number(s.no, nw)+" ") + addSign.Render("+ ") + renderLineOn(s.segs, m.left, w-gw, addTint)
+			return gutterStyle.Render(number(s.no, nw)+" ") + addSign.Render("+ ") + renderLineOn(s.segs, m.left, w-gw, addTint, cursor)
 		case rowDel:
-			return gutterStyle.Render(number(s.no, nw)+" ") + delSign.Render("- ") + renderLineOn(s.segs, m.left, w-gw, delTint)
+			return gutterStyle.Render(number(s.no, nw)+" ") + delSign.Render("- ") + renderLineOn(s.segs, m.left, w-gw, delTint, -1)
 		}
 		return blank(w)
 	}
@@ -264,7 +291,7 @@ func (m *model) renderSplit(rows int) []string {
 			out[i] = s + blank(m.w-lipgloss.Width(s))
 			continue
 		}
-		out[i] = half(r.left, lw) + sep + half(r.right, rw)
+		out[i] = half(r.left, lw, false) + sep + half(r.right, rw, true)
 	}
 	return out
 }

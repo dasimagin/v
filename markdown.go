@@ -37,7 +37,8 @@ func markdown(text string, width int) []string {
 		}
 		md = mdRenderer{cur, width, r}
 	}
-	out, err := md.r.Render(text)
+	// Tabs would move the terminal cursor past our padding; expand them.
+	out, err := md.r.Render(strings.ReplaceAll(text, "\t", "    "))
 	if err != nil {
 		return strings.Split(text, "\n")
 	}

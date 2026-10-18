@@ -102,10 +102,15 @@ type diffRow struct {
 
 const diffContext = 3
 
-// hunks groups the changes between HEAD and the working copy, git style.
-func hunks(d *Doc) [][]difflib.OpCode {
+// hunks groups the changes between the base and the working copy, git
+// style. While editing, the whole file is one group, so every line can be
+// reached; such a group has no hunk header.
+func hunks(d *Doc) (groups [][]difflib.OpCode, headers bool) {
 	m := difflib.NewMatcher(d.Base.Text, d.Text)
-	return m.GetGroupedOpCodes(diffContext)
+	if d.Ed.On {
+		return [][]difflib.OpCode{m.GetOpCodes()}, false
+	}
+	return m.GetGroupedOpCodes(diffContext), true
 }
 
 func hunkHeader(g []difflib.OpCode) string {
@@ -113,15 +118,29 @@ func hunkHeader(g []difflib.OpCode) string {
 	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", first.I1+1, last.I2-first.I1, first.J1+1, last.J2-first.J1)
 }
 
+// rowIndex maps each working-copy line to its row; -1 for lines not shown.
+func rowIndex(n int) []int {
+	at := make([]int, n)
+	for i := range at {
+		at[i] = -1
+	}
+	return at
+}
+
 // unifiedRows lays out the diff like `git diff`.
-func unifiedRows(d *Doc) []diffRow {
+func unifiedRows(d *Doc) ([]diffRow, []int) {
 	b := d.Base
 	var rows []diffRow
-	for _, g := range hunks(d) {
-		rows = append(rows, diffRow{left: side{kind: rowHunk}, head: hunkHeader(g)})
+	at := rowIndex(len(d.Text))
+	groups, headers := hunks(d)
+	for _, g := range groups {
+		if headers {
+			rows = append(rows, diffRow{left: side{kind: rowHunk}, head: hunkHeader(g)})
+		}
 		for _, op := range g {
 			if op.Tag == 'e' {
 				for k := 0; k < op.J2-op.J1; k++ {
+					at[op.J1+k] = len(rows)
 					rows = append(rows, diffRow{left: side{rowCtx, op.J1 + k + 1, d.Lines[op.J1+k]}, oldNo: op.I1 + k + 1})
 				}
 				continue
@@ -133,20 +152,25 @@ func unifiedRows(d *Doc) []diffRow {
 			}
 			if op.Tag == 'i' || op.Tag == 'r' {
 				for j := op.J1; j < op.J2; j++ {
+					at[j] = len(rows)
 					rows = append(rows, diffRow{left: side{rowAdd, j + 1, d.Lines[j]}})
 				}
 			}
 		}
 	}
-	return rows
+	return rows, at
 }
 
-// splitRows lays out the diff side by side: HEAD left, working copy right.
-func splitRows(d *Doc) []diffRow {
+// splitRows lays out the diff side by side: base left, working copy right.
+func splitRows(d *Doc) ([]diffRow, []int) {
 	b := d.Base
 	var rows []diffRow
-	for _, g := range hunks(d) {
-		rows = append(rows, diffRow{left: side{kind: rowHunk}, right: side{kind: rowHunk}, head: hunkHeader(g)})
+	at := rowIndex(len(d.Text))
+	groups, headers := hunks(d)
+	for _, g := range groups {
+		if headers {
+			rows = append(rows, diffRow{left: side{kind: rowHunk}, right: side{kind: rowHunk}, head: hunkHeader(g)})
+		}
 		for _, op := range g {
 			n := max(op.I2-op.I1, op.J2-op.J1)
 			for k := 0; k < n; k++ {
@@ -165,10 +189,11 @@ func splitRows(d *Doc) []diffRow {
 						kind = rowCtx
 					}
 					r.right = side{kind, j + 1, d.Lines[j]}
+					at[j] = len(rows)
 				}
 				rows = append(rows, r)
 			}
 		}
 	}
-	return rows
+	return rows, at
 }

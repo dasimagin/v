@@ -8,12 +8,15 @@ import (
 )
 
 func TestMarkdown(t *testing.T) {
-	lines := markdown("## Defer\n\n- **bold** and `code`\n\n```go\nx := 1\n```\n", 60)
+	lines := markdown("## Defer\n\n- **bold** and `code`\n\n```go\nfunc f() {\n\tx := 1\n}\n```\n", 60)
 	plain := xansi.Strip(strings.Join(lines, "\n"))
 	if strings.Contains(plain, "##") {
 		t.Errorf("heading marks left in:\n%s", plain)
 	}
-	for _, want := range []string{"Defer", "• bold and code", "x := 1"} {
+	if strings.Contains(strings.Join(lines, ""), "\t") {
+		t.Error("tabs must be expanded")
+	}
+	for _, want := range []string{"Defer", "• bold and code", "    x := 1"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("missing %q in:\n%s", want, plain)
 		}

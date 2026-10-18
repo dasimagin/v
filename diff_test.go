@@ -25,7 +25,7 @@ func kinds(rows []diffRow, right bool) string {
 
 func TestUnifiedRows(t *testing.T) {
 	d := docFrom("a\nb\nc\nd\n", "a\nB\nc\nd\ne\n")
-	rows := unifiedRows(d)
+	rows, _ := unifiedRows(d)
 	// hunk, a, -b, +B, c, d, +e
 	if got := kinds(rows, false); got != "hcxacca" {
 		t.Fatalf("kinds = %q", got)
@@ -43,7 +43,7 @@ func TestUnifiedRows(t *testing.T) {
 
 func TestSplitRows(t *testing.T) {
 	d := docFrom("a\nb\nc\n", "a\nB\nB2\nc\n")
-	rows := splitRows(d)
+	rows, _ := splitRows(d)
 	if got := kinds(rows, false); got != "hcx.c" {
 		t.Errorf("left kinds = %q", got)
 	}
@@ -53,12 +53,13 @@ func TestSplitRows(t *testing.T) {
 }
 
 func TestNoChangesAndNewFile(t *testing.T) {
-	if rows := unifiedRows(docFrom("a\n", "a\n")); len(rows) != 0 {
+	if rows, _ := unifiedRows(docFrom("a\n", "a\n")); len(rows) != 0 {
 		t.Errorf("same text gave %d rows", len(rows))
 	}
 	d := docFrom("", "x\ny\n")
 	d.Base = &Base{New: true}
-	if got := kinds(unifiedRows(d), false); got != "haa" {
+	if rows, _ := unifiedRows(d); kinds(rows, false) != "haa" {
+		got := kinds(rows, false)
 		t.Errorf("new file kinds = %q", got)
 	}
 }

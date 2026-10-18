@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 // reviewTools are the tool calls shown as a diff before the user answers.
@@ -42,19 +44,19 @@ func proposedDoc(tool string, in map[string]any) (*Doc, error) {
 		}
 	}
 
-	lang, lines, err := highlight(path, next)
+	d, err := newDoc(path, next)
 	if err != nil {
 		return nil, err
 	}
-	base := &Base{New: true}
+	d.Base, d.Review, d.Orig = &Base{New: true}, tool, append([]string(nil), d.Text...)
 	if exists {
-		_, old, err := highlight(path, string(cur))
+		old, err := newDoc(path, string(cur))
 		if err != nil {
 			return nil, err
 		}
-		base = &Base{Lines: old, Text: texts(old)}
+		d.Base = &Base{Lines: old.Lines, Text: old.Text}
 	}
-	return &Doc{Path: path, Lang: lang, Lines: lines, Text: texts(lines), Base: base, Review: tool}, nil
+	return d, nil
 }
 
 // applyEdit replaces old_string with new_string the way Claude Code's Edit does.
@@ -72,6 +74,27 @@ func applyEdit(text string, in map[string]any) (string, error) {
 		return strings.ReplaceAll(text, old, repl), nil
 	}
 	return strings.Replace(text, old, repl, 1), nil
+}
+
+// applyUserVersion writes the proposal as the user edited it and returns
+// the message that tells the agent so. The edit is reported to Claude Code
+// as rejected: accepting it with changed input would let the agent believe
+// its own version is in the file.
+func applyUserVersion(d *Doc) (string, error) {
+	perm := os.FileMode(0o644)
+	if fi, err := os.Stat(d.Path); err == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := os.WriteFile(d.Path, []byte(d.Contents()), perm); err != nil {
+		return "", err
+	}
+	diff, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A: difflib.SplitLines(strings.Join(d.Orig, "\n") + "\n"), B: difflib.SplitLines(strings.Join(d.Text, "\n") + "\n"),
+		FromFile: "your proposal", ToFile: "saved by the user", Context: 2,
+	})
+	return "The user edited your proposed change and saved their own version of " + d.Path +
+		" instead, so the file now differs from your proposal. Treat the change as done the user's way;" +
+		" do not redo your version. Changes the user made to your proposal:\n```diff\n" + diff + "```", nil
 }
 
 // openReview shows the proposed change on top of the screen stack.

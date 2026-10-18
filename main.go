@@ -28,14 +28,16 @@ const (
 )
 
 type model struct {
-	w, h      int
-	mode      mode
-	omni      textinput.Model
-	menu      *menu
-	dismissed string // omnibox value the menu was closed with Esc for
-	tagline   int
-	status    string // transient error; replaces the hint until the next Enter
-	where     string // "branch · ~/path" on the right of the status line
+	w, h         int
+	mode         mode
+	omni         textinput.Model
+	menu         *menu
+	dismissed    string // omnibox value the menu was closed with Esc for
+	tagline      int
+	status       string // transient error; replaces the hint until the next Enter
+	statusInfo   bool   // status is a notice, not an error
+	discardArmed bool   // Esc once more leaves a file with unsaved changes
+	where        string // "branch · ~/path" on the right of the status line
 
 	doc          *Doc
 	top, left    int
@@ -49,6 +51,8 @@ type model struct {
 	interrupted  bool        // the running turn was interrupted
 	showThinking bool        // Ctrl-O: thinking blocks expanded in the chat
 	perm         *permission // tool call waiting for y/n
+	choice       int         // highlighted answer in the choice list
+	queue        []string    // prompts typed while the agent was busy
 
 	listen tea.Cmd // listens to the agent started at launch
 
@@ -64,7 +68,7 @@ type model struct {
 func newModel() model {
 	ti := textinput.New()
 	ti.Prompt = "› "
-	ti.Placeholder = "type / for commands"
+	ti.Placeholder = placeholder
 	ti.Focus()
 	m := model{omni: ti, tagline: rand.IntN(len(taglines)), where: where(), rmode: viewUnified}
 	m.styleOmni()
@@ -90,7 +94,10 @@ func where() string {
 	return dir
 }
 
-func (m *model) setErr(s string) { m.status = s }
+func (m *model) setErr(s string) { m.status, m.statusInfo = s, false }
+
+// flash shows a notice in the status line until the next Enter.
+func (m *model) flash(s string) { m.status, m.statusInfo = s, true }
 
 // exitWindow is how long a second Ctrl-C or Ctrl-D still quits.
 const exitWindow = time.Second
@@ -101,11 +108,17 @@ var keyNames = map[string]string{"ctrl+c": "Ctrl-C", "ctrl+d": "Ctrl-D"}
 
 func (m model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.listen) }
 
+const placeholder = "type / for commands"
+
 // fileMode reports whether the main area shows a file: opened or under review.
 func (m *model) fileMode() bool { return m.mode == modeView || m.mode == modeReview }
 
-// footerRows is the height under the omnibox: the menu, or the status line.
+// footerRows is the height under the omnibox: the menu, the choices for a
+// pending tool call, or the status line.
 func (m model) footerRows() int {
+	if m.showChoices() {
+		return len(m.choices()) + 1
+	}
 	if m.menu != nil {
 		return min(len(m.menu.items), menuRows)
 	}
@@ -171,16 +184,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	empty := m.omni.Value() == ""
-	// The view dropdown goes first; in a review only "y" accepts, so an
-	// Enter meant for something else never lets an edit through.
-	if m.perm != nil && empty && m.viewMenu == nil {
+	if m.fileMode() {
 		switch {
-		case k == "y" || (k == "enter" && m.mode != modeReview):
-			m.answerPermission(true)
+		case m.viewMenu != nil:
+			m.viewMenuKey(k)
 			return m, nil
-		case k == "n" || k == "esc":
-			m.answerPermission(false)
+		case k == "ctrl+t":
+			m.openViewMenu()
 			return m, nil
+		case m.doc.Ed.On && k != "ctrl+c" && k != "ctrl+o":
+			m.exitKey = ""
+			return m.editKey(msg)
+		}
+	}
+	// A pending tool call: pick from the choice list with ↑↓ and Enter, or
+	// press its key.
+	if m.perm != nil && empty && m.viewMenu == nil {
+		choices := m.choices()
+		switch k {
+		case "up", "shift+tab":
+			m.choice = (m.choice + len(choices) - 1) % len(choices)
+			return m, nil
+		case "down", "tab":
+			m.choice = (m.choice + 1) % len(choices)
+			return m, nil
+		case "enter":
+			m.choose(choices[m.choice].key)
+			return m, nil
+		case "esc":
+			m.choose("n")
+			return m, nil
+		}
+		for _, c := range choices {
+			if k == c.key {
+				m.choose(k)
+				return m, nil
+			}
 		}
 	}
 	if k == "ctrl+o" {
@@ -211,10 +250,6 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(exitWindow, func(time.Time) tea.Msg { return disarmMsg(seq) })
 	}
 	m.exitKey = ""
-	if m.viewMenu != nil && m.fileMode() {
-		m.viewMenuKey(k)
-		return m, nil
-	}
 	if k == "tab" && m.fileMode() && m.omni.Value() == "" {
 		m.openViewMenu()
 		return m, nil
@@ -326,7 +361,18 @@ func (m *model) bodyKey(k string) bool {
 			m.top, m.left = 0, 0
 		case "end":
 			m.scroll(1<<30, 0)
+		case "enter":
+			m.startEdit(-1)
+		case "ctrl+s":
+			m.save()
 		case "esc":
+			if m.doc.Ed.Dirty && m.doc.Review == "" && !m.discardArmed {
+				m.setErr("unsaved changes · ctrl+s save · esc again to discard")
+				m.discardArmed = true
+				return true
+			}
+			m.discardArmed = false
+			m.status = ""
 			m.pop()
 		default:
 			return false
@@ -393,7 +439,14 @@ func (m model) View() string {
 		b.WriteString(strings.Join(m.renderMenu(m.w), "\n"))
 		return b.String()
 	}
+	if m.showChoices() {
+		b.WriteString(strings.Join(m.renderChoices(), "\n"))
+		b.WriteByte('\n')
+	}
 	left, style := " "+m.status, errStyle
+	if m.statusInfo {
+		style = hintStyle
+	}
 	if m.exitKey != "" {
 		left, style = " Press "+keyNames[m.exitKey]+" again to exit", hintStyle
 	} else if m.status == "" {
@@ -411,10 +464,12 @@ func (m model) View() string {
 
 func (m model) hint() string {
 	switch {
-	case m.perm != nil && m.mode == modeReview:
-		return "y accept · n reject · tab view mode · ↑↓ scroll"
+	case m.fileMode() && m.doc.Ed.On && m.mode == modeReview:
+		return "editing the proposal · ctrl+s accept · ctrl+z undo · esc stop editing"
+	case m.fileMode() && m.doc.Ed.On:
+		return "editing · ctrl+s save · ctrl+z undo · ctrl+t view mode · esc stop"
 	case m.perm != nil:
-		return "y allow · n deny"
+		return "↑↓ choose · enter select · pgup/pgdn scroll"
 	case m.busy:
 		return "working… · esc to interrupt"
 	}
@@ -422,7 +477,7 @@ func (m model) hint() string {
 	case modeBrowse:
 		return "↑↓ select · enter open · ← parent · esc back"
 	case modeView:
-		return "↑↓ ←→ scroll · tab view mode · esc back · / commands"
+		return "↑↓ ←→ scroll · enter edit · tab view mode · esc back"
 	case modeChat:
 		return "/ commands · ctrl+o thinking · /reset new session"
 	case modeConfig:

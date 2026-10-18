@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // The agent always runs on this model; there is no setting for it yet.
@@ -23,7 +24,9 @@ const (
 
 // systemPrompt is appended to Claude Code's own system prompt.
 const systemPrompt = `You are running inside v, a terminal UI for coding together with the user.
-The user sees every edit you propose as a diff and approves or rejects it. Keep replies short.`
+The user sees every edit you propose as a diff and approves or rejects it. Keep replies short.
+The user may change your proposed edit before accepting it; the file then holds their version.
+Read a file again before editing it a second time.`
 
 // Agent is a long-running `claude -p` process speaking stream-json on stdin
 // and stdout. It uses the user's Claude Code login: ANTHROPIC_API_KEY is
@@ -178,9 +181,10 @@ const denyMessage = "The user denied this in v."
 
 // permission is a pending can_use_tool request the user has to answer.
 type permission struct {
-	id    string
-	tool  string
-	input map[string]any
+	id     string
+	tool   string
+	input  map[string]any
+	logIdx int // the msgAsk entry in the chat log
 }
 
 type contentBlock struct {
@@ -251,6 +255,7 @@ func firstLine(raw json.RawMessage) string {
 
 // onAgent turns one agent message into chat log entries and state.
 func (m *model) onAgent(msg agentMsg) {
+	defer m.sendQueued()
 	switch msg.Type {
 	case "system":
 		if msg.Subtype == "init" && !m.agentReady {
@@ -301,7 +306,7 @@ func (m *model) onAgent(msg agentMsg) {
 	case "user":
 		for _, b := range blocks(msg.Message) {
 			// Denials already have their own note.
-			if line := firstLine(b.Content); b.Type == "tool_result" && b.IsError && line != denyMessage {
+			if line := firstLine(b.Content); b.Type == "tool_result" && b.IsError && line != denyMessage && !strings.HasPrefix(line, "The user edited your proposed change") {
 				m.noteErr(line)
 			}
 		}
@@ -314,8 +319,19 @@ func (m *model) onAgent(msg agentMsg) {
 		if json.Unmarshal(msg.Request, &req) != nil || req.Subtype != "can_use_tool" {
 			return
 		}
-		m.perm = &permission{id: msg.RequestID, tool: req.ToolName, input: req.Input}
-		m.log = append(m.log, message{kind: msgAsk, text: "Allow " + toolSummary(req.ToolName, req.Input) + "?  y / n"})
+		m.perm, m.choice = &permission{id: msg.RequestID, tool: req.ToolName, input: req.Input}, 0
+		// The tool call line turns into the question, and later into its answer.
+		summary := toolSummary(req.ToolName, req.Input)
+		m.perm.logIdx = -1
+		for i := len(m.log) - 1; i >= 0 && m.perm.logIdx < 0; i-- {
+			if m.log[i].kind == msgTool && m.log[i].text == summary {
+				m.log[i].kind, m.perm.logIdx = msgAsk, i
+			}
+		}
+		if m.perm.logIdx < 0 {
+			m.perm.logIdx = len(m.log)
+			m.log = append(m.log, message{kind: msgAsk, text: summary})
+		}
 		if reviewTools[req.ToolName] {
 			m.openReview(req.ToolName, req.Input)
 		}
@@ -333,17 +349,33 @@ func (m *model) onAgent(msg agentMsg) {
 	}
 }
 
-// answerPermission resolves the pending tool request.
+// answerPermission resolves the pending tool request. A proposal the user
+// edited is saved by v and reported to the agent with the user's changes.
 func (m *model) answerPermission(allow bool) {
 	p := m.perm
+	edited := allow && m.mode == modeReview && m.doc.Ed.Dirty
+	reason := denyMessage
+	if edited {
+		msg, err := applyUserVersion(m.doc)
+		if err != nil {
+			m.setErr("save: " + err.Error()) // still waiting for an answer
+			return
+		}
+		allow, reason = false, msg
+	}
 	m.perm = nil
-	if err := m.agent.Answer(p.id, allow, p.input, denyMessage); err != nil {
+	if err := m.agent.Answer(p.id, allow, p.input, reason); err != nil {
 		m.setErr(err.Error())
 	}
-	if allow {
-		m.note("  ⎿ allowed")
-	} else {
-		m.note("  ⎿ denied")
+	answer := "n"
+	switch {
+	case edited:
+		answer = "e"
+	case allow:
+		answer = "y"
+	}
+	if p.logIdx < len(m.log) {
+		m.log[p.logIdx].answer = answer
 	}
 	if m.mode == modeReview {
 		m.pop()
@@ -353,7 +385,8 @@ func (m *model) answerPermission(allow bool) {
 // prompt sends text to the agent, starting it on first use.
 func (m *model) prompt(text string) tea.Cmd {
 	if m.busy {
-		m.note("the agent is busy · esc to interrupt")
+		m.queue = append(m.queue, text)
+		m.note("  ⎿ queued: sent when Claude finishes")
 		return nil
 	}
 	cmd := m.connect()
@@ -384,10 +417,74 @@ func (m *model) connect() tea.Cmd {
 	return a.wait()
 }
 
+// sendQueued sends the next queued prompt once the agent is idle.
+func (m *model) sendQueued() {
+	if m.busy || m.agent == nil || len(m.queue) == 0 {
+		return
+	}
+	text := m.queue[0]
+	m.queue = m.queue[1:]
+	if err := m.agent.Prompt(text); err != nil {
+		m.noteErr(err.Error())
+		return
+	}
+	m.busy = true
+}
+
 // stopAgent ends the agent session, if any.
 func (m *model) stopAgent() {
 	if m.agent != nil {
 		m.agent.Close()
 	}
 	m.agent, m.busy, m.perm, m.agentReady = nil, false, nil, false
+	m.queue = nil
+}
+
+// choice is one answer to a pending tool call.
+type choice struct{ key, label string }
+
+// choices are the answers for the pending tool call: edits under review can
+// also be edited before accepting.
+func (m *model) choices() []choice {
+	if m.mode == modeReview {
+		return []choice{{"y", "Yes"}, {"e", "Edit first"}, {"n", "No"}}
+	}
+	return []choice{{"y", "Yes"}, {"n", "No"}}
+}
+
+// showChoices reports whether the choice list replaces the status line.
+func (m *model) showChoices() bool {
+	return m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)
+}
+
+func (m *model) choose(key string) {
+	switch key {
+	case "y":
+		m.answerPermission(true)
+	case "n":
+		m.answerPermission(false)
+	case "e":
+		m.startEdit(-1)
+	}
+}
+
+// renderChoices draws the question and the answers under the omnibox.
+func (m *model) renderChoices() []string {
+	ask := bg.Foreground(lipgloss.Color(cur.Type)).Bold(true)
+	out := []string{bg.Render(" ") + ask.Render("? Allow "+toolSummary(m.perm.tool, m.perm.input)+"?")}
+	labelW := 0
+	for _, c := range m.choices() {
+		labelW = max(labelW, len(c.label))
+	}
+	for i, c := range m.choices() {
+		mark, st := "    ", fgStyle
+		if i == m.choice {
+			mark, st = "  › ", accentStyle.Bold(true)
+		}
+		out = append(out, st.Render(mark+c.label)+blank(labelW-len(c.label)+3)+hintStyle.Render(c.key))
+	}
+	for i, l := range out {
+		out[i] = l + blank(m.w-lipgloss.Width(l))
+	}
+	return out
 }

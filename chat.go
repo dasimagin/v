@@ -9,8 +9,9 @@ import (
 
 // message is one entry of the chat log.
 type message struct {
-	kind msgKind
-	text string
+	kind   msgKind
+	text   string
+	answer string // for msgAsk once answered: "y", "n" or "e" (saved the user's version)
 
 	// Rendered markdown of an agent reply, reused while text, width and
 	// theme stay the same.
@@ -26,7 +27,7 @@ const (
 	msgNote                    // a status line from v
 	msgAgent                   // the agent's reply
 	msgTool                    // a tool call by the agent: "Name argument"
-	msgAsk                     // a permission question
+	msgAsk                     // a tool call waiting for, or given, the user's answer
 	msgThinking                // the model's thinking, collapsed unless expanded
 	msgError                   // an error from the agent or a tool
 )
@@ -36,6 +37,16 @@ func (m *model) note(text string) { m.log = append(m.log, message{kind: msgNote,
 
 // noteErr adds an error to the chat log.
 func (m *model) noteErr(text string) { m.log = append(m.log, message{kind: msgError, text: text}) }
+
+// toolLine draws "Name argument" with the name in name and the rest in arg.
+func toolLine(text string, name, arg lipgloss.Style) string {
+	n, a, _ := strings.Cut(text, " ")
+	out := name.Bold(true).Render(n)
+	if a != "" {
+		out += arg.Render(" " + a)
+	}
+	return out
+}
 
 // chatLine is one rendered row: a two-cell mark and the text, plus the
 // background the row is padded with.
@@ -83,14 +94,21 @@ func (m *model) renderLog(rows int) []string {
 				mark = bg.Render("  ")
 			}
 		case msgTool:
-			name, arg, _ := strings.Cut(msg.text, " ")
-			text := bg.Foreground(c(cur.Func)).Bold(true).Render(name)
-			if arg != "" {
-				text += hintStyle.Render(" " + arg)
-			}
-			lines = append(lines, chatLine{bg.Foreground(c(cur.Added)).Render("⏺ "), text, bg})
+			// The agent's own actions stay in the background.
+			lines = append(lines, chatLine{dim.Render("⏺ "), toolLine(msg.text, hintStyle, dim), bg})
 		case msgAsk:
-			add(bg.Foreground(c(cur.Type)).Bold(true).Render("? "), msg.text, bg.Foreground(c(cur.Type)).Bold(true), bg)
+			// "?" while waiting, then the answer: ✓ yes, ✗ no, ✎ the user's version.
+			switch msg.answer {
+			case "":
+				ask := bg.Foreground(c(cur.Type)).Bold(true)
+				lines = append(lines, chatLine{ask.Render("? "), ask.Render("Allow " + msg.text + "?"), bg})
+			case "y":
+				lines = append(lines, chatLine{bg.Foreground(c(cur.Added)).Render("✓ "), toolLine(msg.text, hintStyle, dim), bg})
+			case "n":
+				lines = append(lines, chatLine{errStyle.Render("✗ "), toolLine(msg.text, hintStyle, dim), bg})
+			case "e":
+				lines = append(lines, chatLine{accentStyle.Render("✎ "), toolLine(msg.text, hintStyle, dim) + dim.Render(" · your version"), bg})
+			}
 		case msgError:
 			add(errStyle.Render("✗ "), msg.text, errStyle, bg)
 		case msgThinking:

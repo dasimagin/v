@@ -22,6 +22,7 @@ const (
 	modeSplash mode = iota // until the first input
 	modeChat
 	modeView
+	modeReview // an agent's proposed edit, waiting for y / n
 	modeBrowse
 	modeConfig
 )
@@ -36,15 +37,25 @@ type model struct {
 	status    string // transient error; replaces the hint until the next Enter
 	where     string // "branch · ~/path" on the right of the status line
 
-	doc       *Doc
-	top, left int
-	browser   *Browser
-	log       []message
-	settings  Settings
-	cfg       *configScreen
-	vmode     viewMode  // flat or diff, kept across files
-	viewMenu  *viewMenu // open view-mode dropdown
-	stack     []screen  // screens to return to with Esc
+	doc          *Doc
+	top, left    int
+	browser      *Browser
+	log          []message
+	settings     Settings
+	cfg          *configScreen
+	agent        *Agent      // nil until the first prompt
+	agentReady   bool        // got the init message
+	busy         bool        // a turn is running
+	interrupted  bool        // the running turn was interrupted
+	showThinking bool        // Ctrl-O: thinking blocks expanded in the chat
+	perm         *permission // tool call waiting for y/n
+
+	listen tea.Cmd // listens to the agent started at launch
+
+	vmode    viewMode  // flat or diff, kept across files
+	rmode    viewMode  // the same for reviews of agent edits
+	viewMenu *viewMenu // open view-mode dropdown
+	stack    []screen  // screens to return to with Esc
 
 	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
 	exitSeq int    // invalidates stale disarm ticks
@@ -55,7 +66,7 @@ func newModel() model {
 	ti.Prompt = "› "
 	ti.Placeholder = "type / for commands"
 	ti.Focus()
-	m := model{omni: ti, tagline: rand.IntN(len(taglines)), where: where()}
+	m := model{omni: ti, tagline: rand.IntN(len(taglines)), where: where(), rmode: viewUnified}
 	m.styleOmni()
 	return m
 }
@@ -88,7 +99,10 @@ type disarmMsg int
 
 var keyNames = map[string]string{"ctrl+c": "Ctrl-C", "ctrl+d": "Ctrl-D"}
 
-func (m model) Init() tea.Cmd { return textinput.Blink }
+func (m model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.listen) }
+
+// fileMode reports whether the main area shows a file: opened or under review.
+func (m *model) fileMode() bool { return m.mode == modeView || m.mode == modeReview }
 
 // footerRows is the height under the omnibox: the menu, or the status line.
 func (m model) footerRows() int {
@@ -102,8 +116,8 @@ func (m model) footerRows() int {
 // (view and browse modes), the two lines around the omnibox, and the footer.
 func (m model) bodyRows() int {
 	rows := m.h - 3 - m.footerRows()
-	if m.mode == modeView || m.mode == modeBrowse || m.mode == modeConfig {
-		rows--
+	if m.fileMode() || m.mode == modeBrowse || m.mode == modeConfig {
+		rows -= headerRows
 	}
 	return max(rows, 1)
 }
@@ -115,7 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.omni.Width = m.w - 4
 		return m, nil
 	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.mode == modeView {
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.fileMode() {
 			m.viewClick(msg.X, msg.Y)
 			return m, nil
 		}
@@ -128,6 +142,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.key(msg)
+	case agentEvent:
+		if msg.a != m.agent {
+			return m, nil // from a session that /reset closed
+		}
+		m.onAgent(msg.msg)
+		return m, m.agent.wait()
+	case agentClosedMsg:
+		if msg.a == m.agent {
+			m.note("Claude Code exited")
+			if msg.stderr != "" {
+				m.note(msg.stderr)
+			}
+			m.agent, m.busy, m.perm, m.agentReady = nil, false, nil, false
+		}
+		return m, nil
 	case disarmMsg:
 		if int(msg) == m.exitSeq {
 			m.exitKey = ""
@@ -141,6 +170,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+	empty := m.omni.Value() == ""
+	// The view dropdown goes first; in a review only "y" accepts, so an
+	// Enter meant for something else never lets an edit through.
+	if m.perm != nil && empty && m.viewMenu == nil {
+		switch {
+		case k == "y" || (k == "enter" && m.mode != modeReview):
+			m.answerPermission(true)
+			return m, nil
+		case k == "n" || k == "esc":
+			m.answerPermission(false)
+			return m, nil
+		}
+	}
+	if k == "ctrl+o" {
+		m.showThinking = !m.showThinking
+		return m, nil
+	}
+	if m.busy && empty && (k == "esc" || k == "ctrl+c") && m.mode == modeChat {
+		if err := m.agent.Interrupt(); err != nil {
+			m.setErr(err.Error())
+		}
+		m.note("interrupted")
+		m.interrupted = true
+		return m, nil
+	}
 	switch {
 	case k == "ctrl+c" && (m.omni.Value() != "" || m.menu != nil):
 		// Like Claude Code: Ctrl-C first clears the input.
@@ -157,11 +211,11 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(exitWindow, func(time.Time) tea.Msg { return disarmMsg(seq) })
 	}
 	m.exitKey = ""
-	if m.viewMenu != nil && m.mode == modeView {
+	if m.viewMenu != nil && m.fileMode() {
 		m.viewMenuKey(k)
 		return m, nil
 	}
-	if k == "tab" && m.mode == modeView && m.omni.Value() == "" {
+	if k == "tab" && m.fileMode() && m.omni.Value() == "" {
 		m.openViewMenu()
 		return m, nil
 	}
@@ -254,7 +308,7 @@ func (m *model) bodyKey(k string) bool {
 			m.setErr(err.Error())
 		}
 		return true
-	case modeView:
+	case modeView, modeReview:
 		switch k {
 		case "up":
 			m.scroll(-1, 0)
@@ -311,18 +365,20 @@ func (m model) View() string {
 			line(l)
 		}
 	case modeBrowse:
-		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" "+tildify(m.browser.dir)+"/ ")+
-			mutedHeader.Render(fmt.Sprintf("· %d ", len(m.browser.entries))), headerStyle))
+		for _, l := range m.header(pathTitle(m.browser.dir, true), fmt.Sprintf("%d items", len(m.browser.entries)), "") {
+			line(l)
+		}
 		for _, l := range m.browser.Render(m.w, rows) {
 			line(l)
 		}
 	case modeConfig:
-		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" settings ")+
-			mutedHeader.Render("· "+tildify(settingsPath())+" "), headerStyle))
+		for _, l := range m.header(fgStyle.Bold(true).Render("Settings"), tildify(settingsPath()), "") {
+			line(l)
+		}
 		for _, l := range m.renderConfig(rows) {
 			line(l)
 		}
-	case modeView:
+	case modeView, modeReview:
 		for _, l := range m.renderView(rows) {
 			line(l)
 		}
@@ -354,13 +410,21 @@ func (m model) View() string {
 }
 
 func (m model) hint() string {
+	switch {
+	case m.perm != nil && m.mode == modeReview:
+		return "y accept · n reject · tab view mode · ↑↓ scroll"
+	case m.perm != nil:
+		return "y allow · n deny"
+	case m.busy:
+		return "working… · esc to interrupt"
+	}
 	switch m.mode {
 	case modeBrowse:
 		return "↑↓ select · enter open · ← parent · esc back"
 	case modeView:
 		return "↑↓ ←→ scroll · tab view mode · esc back · / commands"
 	case modeChat:
-		return "/ commands · /reset new session"
+		return "/ commands · ctrl+o thinking · /reset new session"
 	case modeConfig:
 		return "↑↓ move · enter choose · esc back"
 	}
@@ -388,8 +452,14 @@ func main() {
 	if len(os.Args) > 1 {
 		m.cmdOpen(os.Args[1])
 	}
+	// Connect to Claude Code right away; it signs in with the user's login.
+	m.listen = m.connect()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if fm, ok := final.(model); ok {
+		fm.stopAgent()
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

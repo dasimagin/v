@@ -25,6 +25,9 @@ type Doc struct {
 	Lines [][]seg
 	Text  []string // plain text of Lines
 	Base  *Base    // HEAD version; nil outside a git repository
+	// Review is the agent tool ("Edit", "Write") whose proposed result this
+	// is; Base is then the file on disk. Empty for files opened by the user.
+	Review string
 
 	unified, split []diffRow // built on first use
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -84,10 +87,14 @@ func (m *model) run(input string) tea.Cmd {
 	if m.mode == modeSplash {
 		m.mode = modeChat
 	}
-	m.log = append(m.log, message{user: true, text: input})
+	m.log = append(m.log, message{kind: msgUser, text: input})
 	if !strings.HasPrefix(input, "/") {
-		m.note("the agent is not connected yet")
-		return nil
+		// The reply streams into the chat, so show it.
+		if m.mode != modeChat {
+			m.push()
+			m.mode = modeChat
+		}
+		return m.prompt(input)
 	}
 	name, arg, _ := strings.Cut(input[1:], " ")
 	c := findCommand(name)
@@ -98,13 +105,23 @@ func (m *model) run(input string) tea.Cmd {
 	return c.Run(m, strings.TrimSpace(arg))
 }
 
-// cmdOpen opens a file, or lists a directory; no argument lists the working directory.
+// cmdOpen opens a file, or lists a directory; no argument lists the working
+// directory. A missing file is created empty, like `touch`.
 func (m *model) cmdOpen(arg string) tea.Cmd {
 	path := expandHome(arg)
 	if path == "" {
 		path = "."
 	}
 	fi, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		if err := createFile(path); err != nil {
+			m.setErr(err.Error())
+			return nil
+		}
+		m.note("created " + shortPath(path))
+		m.openFile(path)
+		return nil
+	}
 	if err != nil {
 		m.setErr(err.Error())
 		return nil
@@ -125,6 +142,7 @@ func (m *model) cmdOpen(arg string) tea.Cmd {
 
 // cmdReset drops the session and shows the splash with a new tagline.
 func (m *model) cmdReset(string) tea.Cmd {
+	m.stopAgent()
 	m.log, m.doc, m.browser, m.stack = nil, nil, nil, nil
 	m.mode, m.status = modeSplash, ""
 	next := rand.IntN(len(taglines) - 1)
@@ -133,6 +151,22 @@ func (m *model) cmdReset(string) tea.Cmd {
 	}
 	m.tagline = next
 	return nil
+}
+
+// createFile makes an empty file. Its directory must exist: a typo in a
+// directory name should not leave a trail of new directories.
+func createFile(path string) error {
+	if strings.HasSuffix(path, "/") {
+		return fmt.Errorf("no such directory: %s", path)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("no such directory: %s", filepath.Dir(path))
+	}
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (m *model) openFile(path string) {

@@ -22,12 +22,21 @@ func (m *model) rowCount() int {
 	return len(m.doc.Lines)
 }
 
+// curMode is the view mode setting for the current screen: reviews of agent
+// edits keep their own, so they can default to a diff.
+func (m *model) curMode() *viewMode {
+	if m.mode == modeReview {
+		return &m.rmode
+	}
+	return &m.vmode
+}
+
 // effectiveMode falls back to Flat outside a git repository.
 func (m *model) effectiveMode() viewMode {
 	if m.doc.Base == nil {
 		return viewFlat
 	}
-	return m.vmode
+	return *m.curMode()
 }
 
 func (m *model) unifiedRows() []diffRow {
@@ -49,7 +58,7 @@ func (m *model) modeLabel() string {
 	if m.doc.Base == nil {
 		return " " + viewModeNames[viewFlat] + " "
 	}
-	return " " + viewModeNames[m.vmode] + " ▾ "
+	return " " + viewModeNames[*m.curMode()] + " ▾ "
 }
 
 // openViewMenu opens the dropdown, or explains why there is none.
@@ -58,11 +67,11 @@ func (m *model) openViewMenu() {
 		m.setErr("not in a git repository: diffs are off")
 		return
 	}
-	m.viewMenu = &viewMenu{sel: int(m.vmode)}
+	m.viewMenu = &viewMenu{sel: int(*m.curMode())}
 }
 
 func (m *model) setViewMode(v viewMode) {
-	m.vmode, m.viewMenu, m.top = v, nil, 0
+	*m.curMode(), m.viewMenu, m.top = v, nil, 0
 }
 
 // viewMenuKey handles keys while the dropdown is open.
@@ -92,7 +101,7 @@ func menuWidth() int {
 // viewClick handles a left click in view mode at screen cell (x, y).
 func (m *model) viewClick(x, y int) {
 	labelW := lipgloss.Width(m.modeLabel())
-	if y == 0 && x >= m.w-labelW-1 && x < m.w-1 {
+	if y == headerTitleRow && x >= m.w-labelW-1 && x < m.w-1 {
 		if m.viewMenu != nil {
 			m.viewMenu = nil
 		} else {
@@ -101,7 +110,7 @@ func (m *model) viewClick(x, y int) {
 		return
 	}
 	if m.viewMenu != nil {
-		if i := y - 1; i >= 0 && i < len(viewModeNames) && x >= m.w-menuWidth()-1 {
+		if i := y - headerRows; i >= 0 && i < len(viewModeNames) && x >= m.w-menuWidth()-1 {
 			m.setViewMode(viewMode(i))
 			return
 		}
@@ -113,8 +122,11 @@ func (m *model) viewClick(x, y int) {
 func (m *model) renderView(rows int) []string {
 	d := m.doc
 	total := m.rowCount()
-	pos := fmt.Sprintf(" %d/%d ", min(m.top+rows, total), total)
-	left := titleStyle.Render(" v ") + headerStyle.Render(" "+tildify(d.Path)+" ") + mutedHeader.Render("· "+d.Lang+" ·"+pos)
+	title := pathTitle(d.Path, false)
+	if d.Review != "" {
+		title = buttonOpen.Render(" proposed "+d.Review+" ") + bg.Render("  ") + title
+	}
+	info := fmt.Sprintf("%s · %d/%d", d.Lang, min(m.top+rows, total), total)
 	labelStyle := buttonOff
 	switch {
 	case d.Base != nil && m.viewMenu != nil:
@@ -122,11 +134,7 @@ func (m *model) renderView(rows int) []string {
 	case d.Base != nil:
 		labelStyle = buttonStyle
 	}
-	// The button sits one cell in from the right edge.
-	button := labelStyle.Render(m.modeLabel()) + headerStyle.Render(" ")
-	bw := lipgloss.Width(button)
-	gap := max(m.w-lipgloss.Width(left)-bw, 0)
-	out := []string{ansi.Truncate(left+headerStyle.Render(strings.Repeat(" ", gap)), m.w-bw, "") + button}
+	out := m.header(title, info, labelStyle.Render(m.modeLabel()))
 
 	var body []string
 	switch m.effectiveMode() {
@@ -142,13 +150,13 @@ func (m *model) renderView(rows int) []string {
 		mw := menuWidth()
 		for i, name := range viewModeNames {
 			item := "  " + name + strings.Repeat(" ", mw-2-lipgloss.Width(name))
-			st := headerStyle.Bold(false)
+			st := lipgloss.NewStyle().Background(lipgloss.Color(cur.Panel)).Foreground(lipgloss.Color(cur.Fg))
 			if i == m.viewMenu.sel {
 				item = "› " + item[2:]
 				st = buttonStyle
 			}
 			if i < len(body) {
-				body[i] = ansi.Truncate(body[i], m.w-mw-1, "") + st.Render(item) + headerStyle.Render(" ")
+				body[i] = ansi.Truncate(body[i], m.w-mw-1, "") + st.Render(item) + bg.Render(" ")
 			}
 		}
 	}

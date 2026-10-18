@@ -204,10 +204,11 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.editKey(msg)
 		}
 	}
-	// A pending tool call: pick from the choice list with ↑↓ and Enter, or
-	// press its key.
-	if m.perm != nil && empty && m.viewMenu == nil {
+	// A pending tool call: pick an answer with ↑↓ and Enter, or its digit.
+	// Text typed meanwhile is a note that goes with the answer.
+	if m.perm != nil && m.viewMenu == nil {
 		choices := m.choices()
+		note := strings.TrimSpace(m.omni.Value())
 		switch k {
 		case "up", "shift+tab":
 			m.choice = (m.choice + len(choices) - 1) % len(choices)
@@ -216,15 +217,20 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.choice = (m.choice + 1) % len(choices)
 			return m, nil
 		case "enter":
-			m.choose(choices[m.choice].key)
+			m.omni.SetValue("")
+			m.choose(choices[m.choice].key, note)
 			return m, nil
 		case "esc":
-			m.choose("n")
+			if !empty {
+				m.omni.SetValue("") // the first Esc drops the note
+			} else {
+				m.choose("n", "")
+			}
 			return m, nil
 		}
-		for _, c := range choices {
-			if k == c.key {
-				m.choose(k)
+		for i, c := range choices {
+			if empty && k == fmt.Sprint(i+1) {
+				m.choose(c.key, "")
 				return m, nil
 			}
 		}
@@ -455,6 +461,9 @@ func (m model) View() string {
 	// Omnibox between two lines, like Claude Code's input; footer below.
 	sep := sepStyle.Render(strings.Repeat("─", m.w))
 	line(sep)
+	if m.showChoices() {
+		m.omni.Placeholder = "add a note for Claude, or just press enter"
+	}
 	line(pad(m.omni.View(), bg))
 	line(sep)
 	if m.menu != nil {
@@ -496,7 +505,7 @@ func (m model) hint() string {
 	case m.fileMode() && m.doc.Ed.On:
 		return "editing · ctrl+s save · ctrl+z undo · ctrl+t view mode · esc stop"
 	case m.perm != nil:
-		return "↑↓ choose · enter select · pgup/pgdn scroll"
+		return "↑↓ choose · enter answer · 1-3 quick pick · pgup/pgdn scroll"
 	case m.busy:
 		return "working… · esc to interrupt"
 	}

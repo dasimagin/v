@@ -116,6 +116,7 @@ func (m *model) startEdit(line int) {
 		line = m.firstVisibleLine()
 	}
 	d.Ed.On = true
+	m.omni.Blur() // keys go to the file; the omnibox cursor would mislead
 	d.unified, d.split = nil, nil
 	d.Ed.Cur = pos{line, 0}
 	d.clamp()
@@ -128,6 +129,7 @@ func (m *model) stopEdit() {
 	d := m.doc
 	line := d.Ed.Cur.Line
 	d.Ed.On = false
+	m.omni.Focus()
 	d.unified, d.split = nil, nil
 	m.top = 0
 	// Back in hunk view, scroll to where the cursor was if it is shown.
@@ -243,7 +245,7 @@ func (m *model) save() {
 	d := m.doc
 	if d.Review != "" {
 		if m.perm != nil {
-			m.answerPermission(true)
+			m.answerPermission(true, "")
 		}
 		return
 	}

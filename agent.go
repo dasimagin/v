@@ -184,7 +184,8 @@ type permission struct {
 	id     string
 	tool   string
 	input  map[string]any
-	logIdx int // the msgAsk entry in the chat log
+	logIdx int    // the msgAsk entry in the chat log
+	note   string // typed before choosing Edit; goes with the user's version
 }
 
 type contentBlock struct {
@@ -224,6 +225,13 @@ func toolSummary(name string, in map[string]any) string {
 		}
 	}
 	return name
+}
+
+// fromUser reports whether a tool error is v's own answer to a permission
+// request; those are already shown on the question line.
+func fromUser(line string) bool {
+	return line == denyMessage || strings.HasPrefix(line, "The user rejected this") ||
+		strings.HasPrefix(line, "The user edited your proposed change")
 }
 
 // shortPath shows a path relative to the working directory when it is inside it.
@@ -307,7 +315,7 @@ func (m *model) onAgent(msg agentMsg) {
 	case "user":
 		for _, b := range blocks(msg.Message) {
 			// Denials already have their own note.
-			if line := firstLine(b.Content); b.Type == "tool_result" && b.IsError && line != denyMessage && !strings.HasPrefix(line, "The user edited your proposed change") {
+			if line := firstLine(b.Content); b.Type == "tool_result" && b.IsError && !fromUser(line) {
 				m.noteErr(line)
 			}
 		}
@@ -350,17 +358,28 @@ func (m *model) onAgent(msg agentMsg) {
 	}
 }
 
-// answerPermission resolves the pending tool request. A proposal the user
-// edited is saved by v and reported to the agent with the user's changes.
-func (m *model) answerPermission(allow bool) {
+// answerPermission resolves the pending tool request. note, if any, goes
+// with the answer: as the reason of a rejection, in the message about the
+// user's version, or as the next prompt after an approval. A proposal the
+// user edited is saved by v and reported to the agent with their changes.
+func (m *model) answerPermission(allow bool, note string) {
 	p := m.perm
 	edited := allow && m.mode == modeReview && m.doc.Ed.Dirty
+	if note == "" {
+		note = p.note
+	}
 	reason := denyMessage
+	if note != "" {
+		reason = "The user rejected this and said: " + note
+	}
 	if edited {
 		msg, err := applyUserVersion(m.doc)
 		if err != nil {
 			m.setErr("save: " + err.Error()) // still waiting for an answer
 			return
+		}
+		if note != "" {
+			msg += "\nThe user also said: " + note
 		}
 		allow, reason = false, msg
 	}
@@ -378,9 +397,17 @@ func (m *model) answerPermission(allow bool) {
 	if p.logIdx < len(m.log) {
 		m.log[p.logIdx].answer = answer
 	}
+	if note != "" {
+		m.log = append(m.log, message{kind: msgUser, text: note})
+		if allow {
+			// An approval can't carry text; the note follows as the next prompt.
+			m.queue = append(m.queue, note)
+		}
+	}
 	if m.mode == modeReview {
 		m.pop()
 	}
+	m.omni.Focus()
 }
 
 // prompt sends text to the agent, starting it on first use.
@@ -476,13 +503,14 @@ func (m *model) showChoices() bool {
 	return m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)
 }
 
-func (m *model) choose(key string) {
+func (m *model) choose(key, note string) {
 	switch key {
 	case "y":
-		m.answerPermission(true)
+		m.answerPermission(true, note)
 	case "n":
-		m.answerPermission(false)
+		m.answerPermission(false, note)
 	case "e":
+		m.perm.note = note // sent with the user's version
 		m.startEdit(-1)
 	}
 }
@@ -500,7 +528,7 @@ func (m *model) renderChoices() []string {
 		if i == m.choice {
 			mark, st = "  › ", accentStyle.Bold(true)
 		}
-		out = append(out, st.Render(mark+c.label)+blank(labelW-len(c.label)+3)+hintStyle.Render(c.key))
+		out = append(out, st.Render(mark+c.label)+blank(labelW-len(c.label)+3)+hintStyle.Render(fmt.Sprint(i+1)))
 	}
 	for i, l := range out {
 		out[i] = l + blank(m.w-lipgloss.Width(l))

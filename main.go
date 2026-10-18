@@ -42,7 +42,9 @@ type model struct {
 	log       []message
 	settings  Settings
 	cfg       *configScreen
-	stack     []screen // screens to return to with Esc
+	vmode     viewMode  // flat or diff, kept across files
+	viewMenu  *viewMenu // open view-mode dropdown
+	stack     []screen  // screens to return to with Esc
 
 	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
 	exitSeq int    // invalidates stale disarm ticks
@@ -113,6 +115,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.omni.Width = m.w - 4
 		return m, nil
 	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.mode == modeView {
+			m.viewClick(msg.X, msg.Y)
+			return m, nil
+		}
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.bodyKey("up")
@@ -151,6 +157,14 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(exitWindow, func(time.Time) tea.Msg { return disarmMsg(seq) })
 	}
 	m.exitKey = ""
+	if m.viewMenu != nil && m.mode == modeView {
+		m.viewMenuKey(k)
+		return m, nil
+	}
+	if k == "tab" && m.mode == modeView && m.omni.Value() == "" {
+		m.openViewMenu()
+		return m, nil
+	}
 	if m.menu != nil {
 		switch k {
 		case "tab", "down":
@@ -269,7 +283,7 @@ func (m *model) bodyKey(k string) bool {
 }
 
 func (m *model) scroll(dy, dx int) {
-	m.top = min(max(m.top+dy, 0), max(len(m.doc.Lines)-m.bodyRows(), 0))
+	m.top = min(max(m.top+dy, 0), max(m.rowCount()-m.bodyRows(), 0))
 	m.left = max(m.left+dx, 0)
 }
 
@@ -309,17 +323,8 @@ func (m model) View() string {
 			line(l)
 		}
 	case modeView:
-		d := m.doc
-		pos := fmt.Sprintf(" %d/%d ", min(m.top+rows, len(d.Lines)), len(d.Lines))
-		line(pad(titleStyle.Render(" v ")+headerStyle.Render(" "+tildify(d.Path)+" ")+
-			mutedHeader.Render("· "+d.Lang+" ·"+pos), headerStyle))
-		gw := len(fmt.Sprint(len(d.Lines))) + 2
-		for i := 0; i < rows; i++ {
-			if n := m.top + i; n < len(d.Lines) {
-				line(gutterStyle.Render(fmt.Sprintf("%*d ", gw-1, n+1)) + renderLine(d.Lines[n], m.left, m.w-gw))
-			} else {
-				line(bg.Render(strings.Repeat(" ", m.w)))
-			}
+		for _, l := range m.renderView(rows) {
+			line(l)
 		}
 	}
 
@@ -353,7 +358,7 @@ func (m model) hint() string {
 	case modeBrowse:
 		return "↑↓ select · enter open · ← parent · esc back"
 	case modeView:
-		return "↑↓ ←→ scroll · esc back · / commands"
+		return "↑↓ ←→ scroll · tab view mode · esc back · / commands"
 	case modeChat:
 		return "/ commands · /reset new session"
 	case modeConfig:

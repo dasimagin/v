@@ -1,7 +1,5 @@
 <p align="center">
   <img src="assets/logo.svg" width="200" alt="v">
-  <br>
-  <em>v is for vibing</em>
 </p>
 
 `v` is a terminal tool for coding together with an AI agent: you and the agent take turns editing the same code.
@@ -10,6 +8,7 @@ What works now:
 
 - an omnibox with commands: type `/` for a menu that filters as you type; Tab, Shift-Tab and arrows move the selection, Enter picks it;
 - `/open [path]` opens a file with syntax highlighting or lists a directory; without a path it lists the working directory; paths complete on Tab;
+- the file view has three modes, picked in the top right corner (Tab or a click): Flat, Unified diff and Side-by-side against git `HEAD`;
 - screens stack up: Esc goes back one screen, down to the chat;
 - `/config` edits `~/.v/settings.json`; for now it picks the color theme. Built-in themes are One Dark Pro (+ Darker), One Light and GitHub Dark/Light; any VS Code theme JSON dropped into `~/.v/themes/` shows up too;
 - `/reset` starts over with a fresh splash; `/q`, `/quit`, or Ctrl-D / Ctrl-C twice exits.
@@ -17,7 +16,6 @@ What works now:
 The plan:
 
 - editing files in place;
-- diff against git `HEAD`: unified and side-by-side;
 - an agent on top of Claude Code that uses your Claude subscription login, where every edit it proposes can be reviewed and changed before it lands.
 
 ## Build

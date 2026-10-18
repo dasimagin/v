@@ -67,6 +67,9 @@ var (
 	bg, sepStyle, hintStyle, errStyle, accentStyle    lipgloss.Style
 	headerStyle, titleStyle, mutedHeader, gutterStyle lipgloss.Style
 	fgStyle, selStyle                                 lipgloss.Style
+	addSign, delSign                                  lipgloss.Style
+	buttonStyle, buttonOpen, buttonOff                lipgloss.Style // header buttons
+	addTint, delTint                                  lipgloss.Color // diff line backgrounds
 	syntax                                            *chroma.Style
 	styleCache                                        map[chroma.TokenType]lipgloss.Style
 )
@@ -127,10 +130,17 @@ func applyTheme(t *Theme) {
 	errStyle = bg.Foreground(c(t.Error))
 	accentStyle = bg.Foreground(c(t.Accent))
 	selStyle = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Fg)).Bold(true)
-	headerStyle = lipgloss.NewStyle().Background(c(t.Panel)).Foreground(c(t.Fg))
+	headerStyle = lipgloss.NewStyle().Background(c(t.Panel)).Foreground(c(t.Fg)).Bold(true)
 	titleStyle = headerStyle.Foreground(c(t.Accent)).Bold(true)
-	mutedHeader = headerStyle.Foreground(c(t.Muted))
+	mutedHeader = headerStyle.Foreground(c(t.Muted)).Bold(false)
+	buttonStyle = lipgloss.NewStyle().Background(c(t.Accent)).Foreground(c(t.Bg)).Bold(true)
+	buttonOpen = buttonStyle.Background(c(t.Accent2))
+	buttonOff = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Muted))
 	gutterStyle = bg.Foreground(c(t.Gutter))
+	addTint = gradient(t.Added, t.Bg, 0.82)
+	delTint = gradient(t.Deleted, t.Bg, 0.82)
+	addSign = bg.Background(addTint).Foreground(c(t.Added))
+	delSign = bg.Background(delTint).Foreground(c(t.Deleted))
 	comment := t.Comment
 	if t.CommentItalic {
 		comment = "italic " + comment

@@ -9,6 +9,7 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -22,6 +23,10 @@ type Doc struct {
 	Path  string
 	Lang  string
 	Lines [][]seg
+	Text  []string // plain text of Lines
+	Base  *Base    // HEAD version; nil outside a git repository
+
+	unified, split []diffRow // built on first use
 }
 
 func LoadDoc(path string) (*Doc, error) {
@@ -36,7 +41,7 @@ func LoadDoc(path string) (*Doc, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Doc{Path: path, Lang: lang, Lines: lines}, nil
+	return &Doc{Path: path, Lang: lang, Lines: lines, Text: texts(lines), Base: loadBase(path)}, nil
 }
 
 // highlight splits src into lines of tokens. The lexer is picked by file
@@ -81,6 +86,15 @@ func highlight(name, src string) (string, [][]seg, error) {
 
 // renderLine draws columns [left, left+width) of a line, padded to width.
 func renderLine(segs []seg, left, width int) string {
+	return renderLineOn(segs, left, width, "")
+}
+
+// renderLineOn is renderLine over a tinted background ("" for the theme's).
+func renderLineOn(segs []seg, left, width int, tint lipgloss.Color) string {
+	padStyle := bg
+	if tint != "" {
+		padStyle = bg.Background(tint)
+	}
 	var sb strings.Builder
 	col, used := 0, 0
 	for _, s := range segs {
@@ -94,14 +108,18 @@ func renderLine(segs []seg, left, width int) string {
 			col += w
 		}
 		if chunk.Len() > 0 {
-			sb.WriteString(styleFor(s.tok).Render(chunk.String()))
+			st := styleFor(s.tok)
+			if tint != "" {
+				st = st.Background(tint)
+			}
+			sb.WriteString(st.Render(chunk.String()))
 		}
 		if used >= width {
 			break
 		}
 	}
 	if used < width {
-		sb.WriteString(bg.Render(strings.Repeat(" ", width-used)))
+		sb.WriteString(padStyle.Render(strings.Repeat(" ", width-used)))
 	}
 	return sb.String()
 }

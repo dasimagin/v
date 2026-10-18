@@ -10,11 +10,13 @@ type screen struct {
 
 // push saves the current screen before opening another one on top.
 func (m *model) push() {
+	m.viewMenu = nil
 	m.stack = append(m.stack, screen{m.mode, m.doc, m.browser, m.top, m.left})
 }
 
 // pop returns to the previous screen, or to the chat when there is none.
 func (m *model) pop() {
+	m.viewMenu = nil
 	if len(m.stack) == 0 {
 		m.mode = modeChat
 		return

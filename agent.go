@@ -16,12 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The agent always runs on this model; there is no setting for it yet.
-const (
-	agentModel  = "claude-opus-5-5"
-	agentEffort = "high"
-)
-
 // systemPrompt is appended to Claude Code's own system prompt.
 const systemPrompt = `You are running inside v, a terminal UI for coding together with the user.
 The user sees every edit you propose as a diff and approves or rejects it. Keep replies short.
@@ -52,6 +46,7 @@ type agentMsg struct {
 	Result    string          `json:"result"`
 	IsError   bool            `json:"is_error"`
 	Duration  int             `json:"duration_ms"`
+	SessionID string          `json:"session_id"`
 	NumTurns  int             `json:"num_turns"`
 }
 
@@ -67,8 +62,10 @@ type agentClosedMsg struct {
 	stderr string
 }
 
-func startAgent(dir string) (*Agent, error) {
-	model := agentModel
+// startAgent runs Claude Code in dir with the model and effort from s;
+// resume, if set, continues that session.
+func startAgent(dir string, s Settings, resume string) (*Agent, error) {
+	model := s.Model
 	if env := os.Getenv("V_CLAUDE_MODEL"); env != "" {
 		model = env // only for testing v cheaply
 	}
@@ -79,9 +76,12 @@ func startAgent(dir string) (*Agent, error) {
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
 		"--append-system-prompt", systemPrompt,
-		"--model", model, "--effort", agentEffort,
+		"--model", model, "--effort", s.Effort,
 		"--thinking-display", "summarized", // without it thinking blocks come empty
 	)
+	if resume != "" {
+		cmd.Args = append(cmd.Args, "--resume", resume)
+	}
 	cmd.Dir = dir
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
@@ -259,7 +259,7 @@ func (m *model) onAgent(msg agentMsg) {
 	switch msg.Type {
 	case "system":
 		if msg.Subtype == "init" && !m.agentReady {
-			m.agentReady = true
+			m.agentReady, m.sessionID = true, msg.SessionID
 			m.note("connected to Claude Code · " + msg.Model)
 		}
 	case "stream_event":
@@ -404,11 +404,17 @@ func (m *model) prompt(text string) tea.Cmd {
 // connect starts Claude Code if it is not running and returns the command
 // that listens to it.
 func (m *model) connect() tea.Cmd {
+	resume := ""
+	if m.agent != nil && m.agentStale && !m.busy {
+		// New model or effort: restart Claude Code on the same session.
+		resume = m.sessionID
+		m.stopAgent()
+	}
 	if m.agent != nil {
 		return nil
 	}
 	dir, _ := os.Getwd()
-	a, err := startAgent(dir)
+	a, err := startAgent(dir, m.settings, resume)
 	if err != nil {
 		m.note(err.Error())
 		return nil
@@ -431,12 +437,21 @@ func (m *model) sendQueued() {
 	m.busy = true
 }
 
+// agentSettingsChanged makes the next prompt restart Claude Code with the
+// new model or effort, keeping the conversation.
+func (m *model) agentSettingsChanged() {
+	if m.agent != nil {
+		m.agentStale = true
+	}
+	m.flash(modelName(m.settings.Model) + " · " + m.settings.Effort + " from the next message")
+}
+
 // stopAgent ends the agent session, if any.
 func (m *model) stopAgent() {
 	if m.agent != nil {
 		m.agent.Close()
 	}
-	m.agent, m.busy, m.perm, m.agentReady = nil, false, nil, false
+	m.agent, m.busy, m.perm, m.agentReady, m.agentStale = nil, false, nil, false, false
 	m.queue = nil
 }
 

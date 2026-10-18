@@ -10,11 +10,33 @@ import (
 
 // Settings is the user config in ~/.v/settings.json.
 type Settings struct {
-	Theme string `json:"theme"`
+	Theme  string `json:"theme"`
+	Model  string `json:"model"`  // Claude Code --model
+	Effort string `json:"effort"` // Claude Code --effort
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high"}
+}
+
+// models are the choices for the agent's model, best first.
+var models = []struct{ ID, Name string }{
+	{"claude-fable-5-1", "Fable 5.1"},
+	{"claude-opus-5-5", "Opus 5.5"},
+	{"claude-sonnet-5-5", "Sonnet 5.5"},
+	{"claude-haiku-5-5", "Haiku 5.5"},
+}
+
+var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// modelName is the display name of a model ID; unknown IDs show as is.
+func modelName(id string) string {
+	for _, m := range models {
+		if m.ID == id {
+			return m.Name
+		}
+	}
+	return id
 }
 
 // configDir is ~/.v: settings.json and the user's themes/ live there.

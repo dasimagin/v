@@ -15,6 +15,7 @@ type option struct {
 	values  func() []string             // display names
 	get     func(*model) int            // index of the current value
 	set     func(m *model, i int) error // apply value i; save happens on Enter
+	apply   func(m *model)              // after the choice is saved; may be nil
 }
 
 var options = []option{
@@ -41,6 +42,46 @@ var options = []option{
 			m.settings.Theme = themes[i].ID
 			return nil
 		},
+	},
+	{
+		label: "Model",
+		values: func() []string {
+			names := make([]string, len(models))
+			for i, x := range models {
+				names[i] = x.Name
+			}
+			return names
+		},
+		get: func(m *model) int {
+			for i, x := range models {
+				if x.ID == m.settings.Model {
+					return i
+				}
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.Model = models[i].ID
+			return nil
+		},
+		apply: (*model).agentSettingsChanged,
+	},
+	{
+		label:  "Effort",
+		values: func() []string { return efforts },
+		get: func(m *model) int {
+			for i, e := range efforts {
+				if e == m.settings.Effort {
+					return i
+				}
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.Effort = efforts[i]
+			return nil
+		},
+		apply: (*model).agentSettingsChanged,
 	},
 }
 
@@ -80,6 +121,9 @@ func (m *model) configKey(k string) bool {
 			c.open = false
 			if err := m.settings.save(); err != nil {
 				m.setErr("save settings: " + err.Error())
+			}
+			if o.apply != nil && c.pick != c.orig {
+				o.apply(m)
 			}
 		case "esc":
 			c.open = false

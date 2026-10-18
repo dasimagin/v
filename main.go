@@ -47,6 +47,8 @@ type model struct {
 	cfg          *configScreen
 	agent        *Agent      // nil until the first prompt
 	agentReady   bool        // got the init message
+	agentStale   bool        // model or effort changed: restart before the next prompt
+	sessionID    string      // Claude Code session, for --resume
 	busy         bool        // a turn is running
 	interrupted  bool        // the running turn was interrupted
 	showThinking bool        // Ctrl-O: thinking blocks expanded in the chat
@@ -452,8 +454,13 @@ func (m model) View() string {
 	} else if m.status == "" {
 		left, style = " "+m.hint(), hintStyle
 	}
-	right := m.where + " "
-	if lipgloss.Width(left)+lipgloss.Width(right) >= m.w {
+	// The model always fits; the branch and path go first when space is short.
+	agent := modelName(m.settings.Model) + " · " + m.settings.Effort + " "
+	right := agent
+	if full := m.where + " · " + agent; lipgloss.Width(left)+lipgloss.Width(full) < m.w {
+		right = full
+	}
+	if lipgloss.Width(right) >= m.w/2 {
 		right = ""
 	}
 	left = runewidth.Truncate(left, m.w-lipgloss.Width(right), "…")

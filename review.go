@@ -98,8 +98,8 @@ func applyUserVersion(d *Doc) (string, error) {
 }
 
 // openReview shows the proposed change on top of the screen stack.
-func (m *model) openReview(tool string, in map[string]any) {
-	d, err := proposedDoc(tool, in)
+func (m *model) openReview(p *permission) {
+	d, err := p.propose()
 	if err != nil {
 		m.note("  ⎿ can't show the diff: " + err.Error())
 		return

@@ -46,7 +46,7 @@ type model struct {
 	log          []message
 	settings     Settings
 	cfg          *configScreen
-	agent        *Agent          // nil until the first prompt
+	agent        backend         // nil until started
 	agentReady   bool            // got the init message
 	agentStale   bool            // model or effort changed: restart before the next prompt
 	sessionID    string          // Claude Code session, for --resume
@@ -167,7 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.a != m.agent {
 			return m, nil // from a session that /reset closed
 		}
-		m.onAgent(msg.msg)
+		m.onEvent(msg.e)
 		return m, m.agent.wait()
 	case agentClosedMsg:
 		if msg.a == m.agent {
@@ -486,9 +486,9 @@ func (m model) View() string {
 	sep := sepStyle.Render(strings.Repeat("─", m.w))
 	line(sep)
 	if m.showChoices() {
-		m.omni.Placeholder = "tab adds a note for Claude"
+		m.omni.Placeholder = "tab adds a note for the agent"
 		if m.noting {
-			m.omni.Placeholder = "a note for Claude · enter sends it with the answer · esc drops it"
+			m.omni.Placeholder = "a note for the agent · enter sends it with the answer · esc drops it"
 		}
 	}
 	line(pad(m.omni.View(), bg))
@@ -511,7 +511,7 @@ func (m model) View() string {
 		left, style = " "+m.hint(), hintStyle
 	}
 	// The model always fits; the branch and path go first when space is short.
-	agent := modelName(m.settings.Model) + " · " + m.settings.Effort + " "
+	agent := m.agentLabel() + " "
 	right := agent
 	if full := m.where + " · " + agent; lipgloss.Width(left)+lipgloss.Width(full) < m.w {
 		right = full

@@ -13,7 +13,7 @@ type option struct {
 	label   string
 	desc    string                      // one muted line under the label
 	preview bool                        // show the code preview while picking
-	values  func() []string             // display names
+	values  func(*model) []string       // display names
 	get     func(*model) int            // index of the current value
 	set     func(m *model, i int) error // apply value i; save happens on Enter
 	apply   func(m *model)              // after the choice is saved; may be nil
@@ -24,7 +24,7 @@ var options = []option{
 		label:   "Color theme",
 		desc:    "Colors of v and of the code; drop VS Code themes into ~/.v/themes",
 		preview: true,
-		values: func() []string {
+		values: func(*model) []string {
 			names := make([]string, len(themes))
 			for i, t := range themes {
 				names[i] = t.Name
@@ -46,25 +46,59 @@ var options = []option{
 		},
 	},
 	{
+		label: "Agent",
+		desc:  "Who does the work; each signs in with its own subscription",
+		values: func(*model) []string {
+			return []string{"Claude Code", "Codex"}
+		},
+		get: func(m *model) int {
+			if m.settings.Agent == agentCodex {
+				return 1
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.Agent = []string{"claude", agentCodex}[i]
+			return nil
+		},
+		apply: (*model).agentChanged,
+	},
+	{
 		label: "Model",
-		desc:  "The Claude model the agent runs on",
-		values: func() []string {
-			names := make([]string, len(models))
-			for i, x := range models {
-				names[i] = x.Name
+		desc:  "The model the agent runs on",
+		values: func(m *model) []string {
+			var names []string
+			for _, x := range agentModels(m) {
+				names = append(names, x.Name)
 			}
 			return names
 		},
 		get: func(m *model) int {
-			for i, x := range models {
-				if x.ID == m.settings.Model {
+			cur := m.settings.Model
+			if m.settings.Agent == agentCodex {
+				cur = m.settings.CodexModel
+				if cur == "" {
+					cur = codexDefault().ID
+				}
+			}
+			for i, x := range agentModels(m) {
+				if x.ID == cur {
 					return i
 				}
 			}
 			return 0
 		},
 		set: func(m *model, i int) error {
-			m.settings.Model = models[i].ID
+			list := agentModels(m)
+			if i >= len(list) {
+				return nil
+			}
+			if m.settings.Agent == agentCodex {
+				m.settings.CodexModel = list[i].ID
+				m.settings.CodexEffort = "" // efforts differ between models
+			} else {
+				m.settings.Model = list[i].ID
+			}
 			return nil
 		},
 		apply: (*model).agentSettingsChanged,
@@ -72,21 +106,79 @@ var options = []option{
 	{
 		label:  "Effort",
 		desc:   "How hard the model thinks: more is slower and uses more of your plan",
-		values: func() []string { return efforts },
+		values: agentEfforts,
 		get: func(m *model) int {
-			for i, e := range efforts {
-				if e == m.settings.Effort {
+			cur := m.settings.Effort
+			if m.settings.Agent == agentCodex {
+				cur = m.settings.CodexEffort
+				if cur == "" {
+					return 0 // "default"
+				}
+			}
+			for i, e := range agentEfforts(m) {
+				if e == cur {
 					return i
 				}
 			}
 			return 0
 		},
 		set: func(m *model, i int) error {
-			m.settings.Effort = efforts[i]
+			list := agentEfforts(m)
+			if i >= len(list) {
+				return nil
+			}
+			if m.settings.Agent == agentCodex {
+				m.settings.CodexEffort = list[i]
+				if i == 0 {
+					m.settings.CodexEffort = "" // "default"
+				}
+			} else {
+				m.settings.Effort = list[i]
+			}
 			return nil
 		},
 		apply: (*model).agentSettingsChanged,
 	},
+}
+
+type modelChoice struct{ ID, Name string }
+
+// agentModels are the models of the chosen agent. Codex's list comes from
+// Codex itself, the first time it is needed.
+func agentModels(m *model) []modelChoice {
+	var out []modelChoice
+	if m != nil && m.settings.Agent == agentCodex {
+		list, err := loadCodexModels()
+		if err != nil {
+			m.setErr("codex: " + err.Error())
+		}
+		for _, x := range list {
+			out = append(out, modelChoice{x.ID, x.Name})
+		}
+		return out
+	}
+	for _, x := range models {
+		out = append(out, modelChoice{x.ID, x.Name})
+	}
+	return out
+}
+
+// agentEfforts are the efforts the chosen model supports. For Codex the
+// first one, "default", leaves the choice to the model.
+func agentEfforts(m *model) []string {
+	if m == nil || m.settings.Agent != agentCodex {
+		return efforts
+	}
+	id := m.settings.CodexModel
+	if id == "" {
+		id = codexDefault().ID
+	}
+	for _, x := range codexModels {
+		if x.ID == id {
+			return append([]string{"default"}, x.Efforts...)
+		}
+	}
+	return []string{"default"}
 }
 
 // configScreen is the state of /config: the focused row and the open dropdown.
@@ -112,7 +204,7 @@ func (m *model) setTheme(t *Theme) {
 func (m *model) configKey(k string) bool {
 	c, o := m.cfg, options[m.cfg.row]
 	if c.open {
-		n := len(o.values())
+		n := len(o.values(m))
 		switch k {
 		case "up", "down":
 			d := 1
@@ -191,7 +283,7 @@ func (m *model) renderConfig(rows int) []string {
 		if i == c.row {
 			mark, st = "› ", accentStyle.Bold(true)
 		}
-		value := " " + o.values()[o.get(m)] + " ▾ "
+		value := " " + o.values(m)[o.get(m)] + " ▾ "
 		valueStyle := selStyle
 		if i == c.row && c.open {
 			valueStyle = buttonOpen
@@ -199,10 +291,10 @@ func (m *model) renderConfig(rows int) []string {
 		add(blank(margin) + st.Render(mark+o.label) + blank(labelW-lipgloss.Width(o.label)+gap) + valueStyle.Render(value))
 		if i == c.row && c.open {
 			w := 0
-			for _, v := range o.values() {
+			for _, v := range o.values(m) {
 				w = max(w, lipgloss.Width(v))
 			}
-			for j, v := range o.values() {
+			for j, v := range o.values(m) {
 				item, ist := "  "+v, panel.Foreground(lipgloss.Color(cur.Fg))
 				if j == c.pick {
 					item, ist = "› "+v, panel.Foreground(lipgloss.Color(cur.Accent)).Bold(true)

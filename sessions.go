@@ -162,6 +162,10 @@ func sessionLog(path string) []message {
 }
 
 func (m *model) cmdResume(string) tea.Cmd {
+	if m.settings.Agent == agentCodex {
+		m.setErr("/resume lists Claude Code sessions; Codex threads are not there yet")
+		return nil
+	}
 	dir, _ := os.Getwd()
 	list := listSessions(dir)
 	if len(list) == 0 {

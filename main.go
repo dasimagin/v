@@ -58,6 +58,7 @@ type model struct {
 	showThinking bool            // Ctrl-O: thinking blocks expanded in the chat
 	perm         *permission     // tool call waiting for y/n
 	choice       int             // highlighted answer in the choice list
+	noting       bool            // Tab during a question: the omnibox takes a note for the answer
 	queue        []string        // prompts typed while the agent was busy
 
 	listen tea.Cmd // listens to the agent started at launch
@@ -204,35 +205,58 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.editKey(msg)
 		}
 	}
-	// A pending tool call: pick an answer with ↑↓ and Enter, or its digit.
-	// Text typed meanwhile is a note that goes with the answer.
+	// A pending tool call: pick an answer with ↑↓ and Enter, or its letter.
+	// Tab opens the omnibox for a note that goes with the answer.
 	if m.perm != nil && m.viewMenu == nil {
 		choices := m.choices()
-		note := strings.TrimSpace(m.omni.Value())
-		switch k {
-		case "up", "shift+tab":
-			m.choice = (m.choice + len(choices) - 1) % len(choices)
-			return m, nil
-		case "down", "tab":
-			m.choice = (m.choice + 1) % len(choices)
-			return m, nil
-		case "enter":
-			m.omni.SetValue("")
-			m.choose(choices[m.choice].key, note)
-			return m, nil
-		case "esc":
-			if !empty {
-				m.omni.SetValue("") // the first Esc drops the note
-			} else {
-				m.choose("n", "")
+		move := func(d int) { m.choice = (m.choice + d + len(choices)) % len(choices) }
+		if m.noting {
+			switch k {
+			case "up":
+				move(-1)
+			case "down":
+				move(1)
+			case "enter":
+				note := strings.TrimSpace(m.omni.Value())
+				m.omni.SetValue("")
+				m.noting = false
+				m.choose(choices[m.choice].key, note)
+			case "esc":
+				m.omni.SetValue("")
+				m.noting = false
+				m.omni.Blur()
+			default:
+				var cmd tea.Cmd
+				m.omni, cmd = m.omni.Update(msg)
+				return m, cmd
 			}
 			return m, nil
 		}
-		for i, c := range choices {
-			if empty && k == fmt.Sprint(i+1) {
-				m.choose(c.key, "")
+		switch k {
+		case "up", "shift+tab":
+			move(-1)
+			return m, nil
+		case "down":
+			move(1)
+			return m, nil
+		case "tab":
+			m.noting = true
+			return m, m.omni.Focus()
+		case "enter":
+			m.choose(choices[m.choice].key, "")
+			return m, nil
+		case "esc":
+			m.choose("n", "")
+			return m, nil
+		}
+		for _, c := range choices {
+			if k == c.key {
+				m.choose(k, "")
 				return m, nil
 			}
+		}
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			return m, nil // letters are answers here, not omnibox input
 		}
 	}
 	if k == "ctrl+o" {
@@ -462,7 +486,10 @@ func (m model) View() string {
 	sep := sepStyle.Render(strings.Repeat("─", m.w))
 	line(sep)
 	if m.showChoices() {
-		m.omni.Placeholder = "add a note for Claude, or just press enter"
+		m.omni.Placeholder = "tab adds a note for Claude"
+		if m.noting {
+			m.omni.Placeholder = "a note for Claude · enter sends it with the answer · esc drops it"
+		}
 	}
 	line(pad(m.omni.View(), bg))
 	line(sep)
@@ -505,7 +532,7 @@ func (m model) hint() string {
 	case m.fileMode() && m.doc.Ed.On:
 		return "editing · ctrl+s save · ctrl+z undo · ctrl+t view mode · esc stop"
 	case m.perm != nil:
-		return "↑↓ choose · enter answer · 1-3 quick pick · pgup/pgdn scroll"
+		return "↑↓ choose · enter answer · tab add a note · pgup/pgdn scroll"
 	case m.busy:
 		return "working… · esc to interrupt"
 	}

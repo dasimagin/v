@@ -129,7 +129,9 @@ func (m *model) stopEdit() {
 	d := m.doc
 	line := d.Ed.Cur.Line
 	d.Ed.On = false
-	m.omni.Focus()
+	if m.perm == nil {
+		m.omni.Focus()
+	}
 	d.unified, d.split = nil, nil
 	m.top = 0
 	// Back in hunk view, scroll to where the cursor was if it is shown.

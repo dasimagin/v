@@ -329,6 +329,7 @@ func (m *model) onAgent(msg agentMsg) {
 			return
 		}
 		m.perm, m.choice = &permission{id: msg.RequestID, tool: req.ToolName, input: req.Input}, 0
+		m.omni.Blur() // keys answer the question until Tab opens a note
 		// The tool call line turns into the question, and later into its answer.
 		summary := toolSummary(req.ToolName, req.Input)
 		m.perm.logIdx = -1
@@ -528,7 +529,7 @@ func (m *model) renderChoices() []string {
 		if i == m.choice {
 			mark, st = "  › ", accentStyle.Bold(true)
 		}
-		out = append(out, st.Render(mark+c.label)+blank(labelW-len(c.label)+3)+hintStyle.Render(fmt.Sprint(i+1)))
+		out = append(out, st.Render(mark+c.label)+blank(labelW-len(c.label)+3)+hintStyle.Render(c.key))
 	}
 	for i, l := range out {
 		out[i] = l + blank(m.w-lipgloss.Width(l))

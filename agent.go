@@ -190,6 +190,7 @@ type permission struct {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
 	Name      string          `json:"name"`
 	Input     map[string]any  `json:"input"`
 	IsError   bool            `json:"is_error"`
@@ -412,6 +413,9 @@ func (m *model) connect() tea.Cmd {
 	}
 	if m.agent != nil {
 		return nil
+	}
+	if m.resumeNext {
+		resume, m.resumeNext = m.sessionID, false
 	}
 	dir, _ := os.Getwd()
 	a, err := startAgent(dir, m.settings, resume)

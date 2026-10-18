@@ -39,6 +39,11 @@ var commands = []*Command{
 		Run:  (*model).cmdConfig,
 	},
 	{
+		Name: "resume",
+		Desc: "Continue a past session in this directory",
+		Run:  (*model).cmdResume,
+	},
+	{
 		Name: "reset",
 		Desc: "Start a new session",
 		Run:  (*model).cmdReset,
@@ -143,6 +148,7 @@ func (m *model) cmdOpen(arg string) tea.Cmd {
 // cmdReset drops the session and shows the splash with a new tagline.
 func (m *model) cmdReset(string) tea.Cmd {
 	m.stopAgent()
+	m.sessionID, m.resumeNext = "", false
 	m.log, m.doc, m.browser, m.stack = nil, nil, nil, nil
 	m.mode, m.status = modeSplash, ""
 	next := rand.IntN(len(taglines) - 1)

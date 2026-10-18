@@ -25,6 +25,7 @@ const (
 	modeReview // an agent's proposed edit, waiting for y / n
 	modeBrowse
 	modeConfig
+	modeSessions // the /resume list
 )
 
 type model struct {
@@ -45,16 +46,18 @@ type model struct {
 	log          []message
 	settings     Settings
 	cfg          *configScreen
-	agent        *Agent      // nil until the first prompt
-	agentReady   bool        // got the init message
-	agentStale   bool        // model or effort changed: restart before the next prompt
-	sessionID    string      // Claude Code session, for --resume
-	busy         bool        // a turn is running
-	interrupted  bool        // the running turn was interrupted
-	showThinking bool        // Ctrl-O: thinking blocks expanded in the chat
-	perm         *permission // tool call waiting for y/n
-	choice       int         // highlighted answer in the choice list
-	queue        []string    // prompts typed while the agent was busy
+	agent        *Agent          // nil until the first prompt
+	agentReady   bool            // got the init message
+	agentStale   bool            // model or effort changed: restart before the next prompt
+	sessionID    string          // Claude Code session, for --resume
+	resumeNext   bool            // the next start continues sessionID (after /resume)
+	sessions     *sessionsScreen // the /resume list
+	busy         bool            // a turn is running
+	interrupted  bool            // the running turn was interrupted
+	showThinking bool            // Ctrl-O: thinking blocks expanded in the chat
+	perm         *permission     // tool call waiting for y/n
+	choice       int             // highlighted answer in the choice list
+	queue        []string        // prompts typed while the agent was busy
 
 	listen tea.Cmd // listens to the agent started at launch
 
@@ -131,7 +134,7 @@ func (m model) footerRows() int {
 // (view and browse modes), the two lines around the omnibox, and the footer.
 func (m model) bodyRows() int {
 	rows := m.h - 3 - m.footerRows()
-	if m.fileMode() || m.mode == modeBrowse || m.mode == modeConfig {
+	if m.fileMode() || m.mode == modeBrowse || m.mode == modeConfig || m.mode == modeSessions {
 		rows -= headerRows
 	}
 	return max(rows, 1)
@@ -313,6 +316,8 @@ func (m *model) bodyKey(k string) bool {
 		}
 	case modeConfig:
 		return m.configKey(k)
+	case modeSessions:
+		return m.sessionsKey(k)
 	case modeBrowse:
 		b := m.browser
 		var err error
@@ -419,6 +424,14 @@ func (m model) View() string {
 		for _, l := range m.browser.Render(m.w, rows) {
 			line(l)
 		}
+	case modeSessions:
+		dir, _ := os.Getwd()
+		for _, l := range m.header(fgStyle.Bold(true).Render("Sessions"), tildify(dir), "") {
+			line(l)
+		}
+		for _, l := range m.renderSessions(rows) {
+			line(l)
+		}
 	case modeConfig:
 		for _, l := range m.header(fgStyle.Bold(true).Render("Settings"), tildify(settingsPath()), "") {
 			line(l)
@@ -489,6 +502,8 @@ func (m model) hint() string {
 		return "/ commands · ctrl+o thinking · /reset new session"
 	case modeConfig:
 		return "↑↓ move · enter choose · esc back"
+	case modeSessions:
+		return "↑↓ select · enter resume · esc back"
 	}
 	return "v is for vibing · /q is for exit"
 }

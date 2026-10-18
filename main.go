@@ -52,6 +52,7 @@ type model struct {
 	sessionID    string          // Claude Code session, for --resume
 	resumeNext   bool            // the next start continues sessionID (after /resume)
 	sessions     *sessionsScreen // the /resume list
+	hist         history         // omnibox history, browsed with ↑↓
 	busy         bool            // a turn is running
 	interrupted  bool            // the running turn was interrupted
 	showThinking bool            // Ctrl-O: thinking blocks expanded in the chat
@@ -77,6 +78,7 @@ func newModel() model {
 	ti.Focus()
 	m := model{omni: ti, tagline: rand.IntN(len(taglines)), where: where(), rmode: viewUnified}
 	m.styleOmni()
+	m.hist = loadHistory()
 	return m
 }
 
@@ -290,7 +292,11 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		v := m.omni.Value()
 		m.omni.SetValue("")
 		m.status, m.dismissed = "", ""
+		m.hist.add(v)
 		return m, m.run(v)
+	}
+	if m.historyKey(k) {
+		return m, nil
 	}
 	// With an empty omnibox, navigation keys drive the main area.
 	if m.omni.Value() == "" && m.bodyKey(k) {
@@ -300,6 +306,7 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.omni, cmd = m.omni.Update(msg)
 	if m.omni.Value() != before {
+		m.hist.pos = -1 // typing ends history browsing
 		m.suggest(false)
 	}
 	return m, cmd

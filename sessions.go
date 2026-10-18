@@ -197,7 +197,7 @@ func (m *model) sessionsKey(k string) bool {
 		ss.sel = min(ss.sel+rows, len(ss.list)-1)
 	case "enter":
 		m.resume(ss.list[ss.sel])
-	case "esc":
+	case "esc", "left":
 		m.pop()
 	default:
 		return false

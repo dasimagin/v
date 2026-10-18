@@ -11,6 +11,7 @@ import (
 // option is one row on the /config screen: a value picked from a dropdown.
 type option struct {
 	label   string
+	desc    string                      // one muted line under the label
 	preview bool                        // show the code preview while picking
 	values  func() []string             // display names
 	get     func(*model) int            // index of the current value
@@ -21,6 +22,7 @@ type option struct {
 var options = []option{
 	{
 		label:   "Color theme",
+		desc:    "Colors of v and of the code; drop VS Code themes into ~/.v/themes",
 		preview: true,
 		values: func() []string {
 			names := make([]string, len(themes))
@@ -45,6 +47,7 @@ var options = []option{
 	},
 	{
 		label: "Model",
+		desc:  "The Claude model the agent runs on",
 		values: func() []string {
 			names := make([]string, len(models))
 			for i, x := range models {
@@ -68,6 +71,7 @@ var options = []option{
 	},
 	{
 		label:  "Effort",
+		desc:   "How hard the model thinks: more is slower and uses more of your plan",
 		values: func() []string { return efforts },
 		get: func(m *model) int {
 			for i, e := range efforts {
@@ -125,7 +129,7 @@ func (m *model) configKey(k string) bool {
 			if o.apply != nil && c.pick != c.orig {
 				o.apply(m)
 			}
-		case "esc":
+		case "esc", "left":
 			c.open = false
 			_ = o.set(m, c.orig)
 		default:
@@ -141,7 +145,7 @@ func (m *model) configKey(k string) bool {
 	case "enter", " ", "right":
 		c.open, c.pick = true, o.get(m)
 		c.orig = c.pick
-	case "esc":
+	case "esc", "left":
 		m.pop()
 	default:
 		return false
@@ -175,24 +179,39 @@ func (m *model) renderConfig(rows int) []string {
 	for _, o := range options {
 		labelW = max(labelW, lipgloss.Width(o.label))
 	}
-	add("")
+	// Each option: label and value on one row, a description under it, and
+	// an empty row before the next one. The open dropdown hangs under the
+	// value as a panel.
+	const margin, gap = 4, 6
+	valueX := margin + 2 + labelW + gap
+	panel := lipgloss.NewStyle().Background(lipgloss.Color(cur.Panel))
 	for i, o := range options {
+		add("")
 		mark, st := "  ", fgStyle
 		if i == c.row {
 			mark, st = "› ", accentStyle.Bold(true)
 		}
-		value := o.values()[o.get(m)] + " ▾"
-		add(bg.Render("  ") + st.Render(mark+o.label+strings.Repeat(" ", labelW-lipgloss.Width(o.label)+3)) + selStyle.Render(" "+value+" "))
+		value := " " + o.values()[o.get(m)] + " ▾ "
+		valueStyle := selStyle
 		if i == c.row && c.open {
-			indent := bg.Render(strings.Repeat(" ", 4+labelW+3))
-			for j, v := range o.values() {
-				if j == c.pick {
-					add(indent + accentStyle.Bold(true).Render("› "+v))
-				} else {
-					add(indent + fgStyle.Render("  "+v))
-				}
-			}
+			valueStyle = buttonOpen
 		}
+		add(blank(margin) + st.Render(mark+o.label) + blank(labelW-lipgloss.Width(o.label)+gap) + valueStyle.Render(value))
+		if i == c.row && c.open {
+			w := 0
+			for _, v := range o.values() {
+				w = max(w, lipgloss.Width(v))
+			}
+			for j, v := range o.values() {
+				item, ist := "  "+v, panel.Foreground(lipgloss.Color(cur.Fg))
+				if j == c.pick {
+					item, ist = "› "+v, panel.Foreground(lipgloss.Color(cur.Accent)).Bold(true)
+				}
+				add(blank(valueX) + ist.Render(" "+item+strings.Repeat(" ", w-lipgloss.Width(v)+1)))
+			}
+			continue
+		}
+		add(blank(margin+2) + hintStyle.Render(o.desc))
 	}
 	// The code preview shows only while picking an option that affects it.
 	if _, lines, err := highlight("preview.go", previewSrc); err == nil && c.open && options[c.row].preview {

@@ -857,3 +857,55 @@ func TestBrandShimmers(t *testing.T) {
 	}
 	brandPhase = 0
 }
+
+func TestSplashShowsLogoAndATipSideBySide(t *testing.T) {
+	var out []string
+	for _, l := range splash("Works on my machine...", 0, 130, 22) {
+		out = append(out, ansi.Strip(l))
+	}
+	text := strings.Join(out, "\n")
+	for _, want := range []string{"██╗", "Works on my machine...", tips[0].title, "╭─ @alice"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("start screen lacks %q", want)
+		}
+	}
+	for i, l := range out {
+		if lw := ansi.StringWidth(l); lw != 130 {
+			t.Fatalf("row %d is %d wide, want 130", i, lw)
+		}
+	}
+	for _, l := range out {
+		if a, b := strings.Index(l, "██╗"), strings.Index(l, "│"); a >= 0 && b >= 0 && a > b {
+			t.Errorf("the logo must be left of the card: %q", l)
+		}
+	}
+	// A narrow window keeps just the logo, centered.
+	var narrow []string
+	for _, l := range splash("x", 0, 40, 22) {
+		narrow = append(narrow, ansi.Strip(l))
+	}
+	if strings.Contains(strings.Join(narrow, "\n"), tips[0].title) {
+		t.Error("no room for a card in 40 columns")
+	}
+	// Every tip fits and draws.
+	for i := range tips {
+		for _, l := range splash("x", i, 100, 24) {
+			if ansi.StringWidth(l) != 100 {
+				t.Fatalf("tip %d: a row is %d wide", i, ansi.StringWidth(l))
+			}
+		}
+	}
+	// The card turns on a tick, only while the start screen is up.
+	m := newModel()
+	m.mode, m.tip = modeSplash, 0
+	next, cmd := m.Update(splashTickMsg{})
+	m = next.(model)
+	if m.tip != 1 || cmd == nil {
+		t.Errorf("tick on the start screen: tip=%d cmd=%v", m.tip, cmd)
+	}
+	m.mode = modeChat
+	next, cmd = m.Update(splashTickMsg{})
+	if next.(model).tip != 1 || cmd != nil {
+		t.Error("the rotation must stop outside the start screen")
+	}
+}

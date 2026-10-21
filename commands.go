@@ -173,7 +173,7 @@ func (m *model) cmdReset(string) tea.Cmd {
 		next++
 	}
 	m.tagline = next
-	return nil
+	return splashTick()
 }
 
 // createFile makes an empty file. Its directory must exist: a typo in a

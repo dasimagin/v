@@ -35,6 +35,7 @@ type model struct {
 	menu         *menu
 	dismissed    string // omnibox value the menu was closed with Esc for
 	tagline      int
+	tip          int    // the card on the start screen
 	status       string // transient error; replaces the hint until the next Enter
 	statusInfo   bool   // status is a notice, not an error
 	discardArmed bool   // Esc once more leaves a file with unsaved changes
@@ -93,7 +94,7 @@ func newModel() model {
 	ti.Placeholder = placeholder
 	ti.Focus()
 	dir, _ := os.Getwd()
-	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified, hub: &applyHub{}}
+	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified, hub: &applyHub{}, tip: rand.IntN(len(tips))}
 	m.styleOmni()
 	m.hist = loadHistory()
 	return m
@@ -120,7 +121,7 @@ type disarmMsg int
 var keyNames = map[string]string{"ctrl+c": "Ctrl-C", "ctrl+d": "Ctrl-D"}
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.listen, repositoryCommand(m.workdir, m.repoSeq, true), repositoryTick(), brandTick(m.settings.Animate))
+	return tea.Batch(textinput.Blink, m.listen, repositoryCommand(m.workdir, m.repoSeq, true), repositoryTick(), brandTick(m.settings.Animate), splashTick())
 }
 
 const placeholder = "type / for commands"
@@ -215,6 +216,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case prSubmitMsg:
 		return m, m.onPRSubmitted(msg)
+	case splashTickMsg:
+		if m.mode != modeSplash {
+			return m, nil // the chain ends; /reset starts it again
+		}
+		m.tip = (m.tip + 1) % len(tips)
+		return m, splashTick()
 	case brandTickMsg:
 		if m.settings.Animate {
 			brandPhase += brandStep
@@ -556,7 +563,7 @@ func (m model) View() string {
 		for _, l := range m.header("", "", "") {
 			line(l)
 		}
-		for _, l := range splash(taglines[m.tagline], m.w, rows) {
+		for _, l := range splash(taglines[m.tagline], m.tip, m.w, rows) {
 			line(l)
 		}
 	case modeChat:

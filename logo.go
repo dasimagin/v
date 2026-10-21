@@ -81,21 +81,6 @@ func renderLogo() []string {
 	return out
 }
 
-// splash returns the logo and the tagline, centered in width×rows.
-func splash(tagline string, width, rows int) []string {
-	block := append(renderLogo(), "", hintStyle.Italic(true).Render(tagline))
-	top := max((rows-len(block))/2, 0)
-	out := make([]string, rows)
-	for i := range out {
-		line := ""
-		if i >= top && i < top+len(block) {
-			line = block[i-top]
-		}
-		out[i] = center(line, width)
-	}
-	return out
-}
-
 // center pads a rendered line to width on both sides.
 func center(s string, width int) string {
 	w := lipgloss.Width(s)

@@ -6,6 +6,7 @@
 
 What works now:
 
+- the start screen has the "V" logo with its joke on the left and, when the window is wide enough, a card on the right that turns every few seconds: a sketch of a screen (`/pr`, `/review make`, `/apply`, `/open`, `/show`, the model dropdown) with a line about it. It stops as soon as you start working;
 - an omnibox with commands: type `/` for a menu that filters as you type; Tab, Shift-Tab and arrows move the selection, Enter picks it;
 - workdir defaults to the directory where `v` was launched. Start with `v /path/to/project` or `v -C /path/to/project` (`--workdir` also works); `/workdir` opens a directory list: → enters the highlighted folder, ← goes up (and highlights the folder you left), Enter chooses it; `/workdir <directory>` changes it directly, and `/workdir` shows the current path. The agent and conversation are kept when changing workdir;
 - `/open [path]` stays in the omnibox and lists workdir (or the path's directory) in the main area; typing fuzzy-filters names, ↑↓ select, → enters a folder or opens a file, ← goes up, Enter opens (a name with no match is created empty); files open with syntax highlighting;

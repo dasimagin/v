@@ -878,11 +878,12 @@ func TestResetChangesTheJoke(t *testing.T) {
 }
 
 func TestEveryJokeFitsTheStartScreen(t *testing.T) {
-	if len(taglines) < 50 {
-		t.Errorf("only %d jokes", len(taglines))
+	jokes := builtinTaglines()
+	if len(jokes) < 50 {
+		t.Errorf("only %d jokes", len(jokes))
 	}
 	seen := map[string]bool{}
-	for _, j := range taglines {
+	for _, j := range jokes {
 		if seen[j] {
 			t.Errorf("duplicate joke %q", j)
 		}

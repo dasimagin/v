@@ -1,7 +1,10 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -20,75 +23,32 @@ var logo = []string{
 	"      ╚══╝      ",
 }
 
-var taglines = []string{
-	"Vibing time...",
-	"Code & coffee...",
-	"Let's deploy this shit...",
-	"Works on my machine...",
-	"It compiles. Ship it...",
-	"Deploy on Friday, what could go wrong...",
-	"It's not a bug, it's a feature...",
-	"Senior Stack Overflow engineer...",
-	"Have you tried turning it off and on again?",
-	"Vibes > specs...",
-	"If it works, don't touch it...",
-	"A hack, but a reliable one...",
-	"Works in my venv...",
-	"One typo, 400 lines of template errors...",
-	"Undefined behavior, defined vibes...",
-	"There are two hard things: naming, cache invalidation, and off-by-one errors...",
-	"Weeks of coding save hours of planning...",
-	"Hello, World. Now what...",
-	"Move fast and fix it later...",
-	"The cloud is just someone else's computer...",
-	"Legacy code: it works, nobody knows why...",
-	"Fixed one bug, found three...",
-	"Tests are documentation that can fail...",
-	"It worked yesterday...",
-	"Ctrl+C, Ctrl+V, ship...",
-	"No code is the best code...",
-	"Rubber duck debugging in progress...",
-	"Tabs or spaces? Yes...",
-	"Premature optimization is the root of all evil...",
-	"A watched build never finishes...",
-	"Why is it slow? It is always the database...",
-	"Ask forgiveness, not permission, in prod...",
-	"Compiling. Time for a coffee...",
-	"The tests passed. Suspicious...",
-	"Just one more refactor...",
-	"Merge conflicts build character...",
-	"Estimated: two days. Actual: two weeks...",
-	"Have you read the logs?",
-	"It's always DNS...",
-	"Debugging: being the detective in a crime movie where you are also the murderer...",
-	"Coffee.exe has stopped responding...",
-	"Make it work, make it right, make it fast...",
-	"Trust, but verify the diff...",
-	"Magic is just code you have not read yet...",
-	"Reviewing with love, shipping with hope...",
-	"Green build, sleepy reviewer...",
-	"One does not simply merge on Friday...",
-	"The best code is the code you deleted...",
-	"Cache me if you can...",
-	"Semicolons are a state of mind...",
-	"It depends...",
-	"Another day, another dependency...",
-	"The PR was small, they said...",
-	// Code stays as typed.
-	"git push --force and pray",
-	"// TODO: write tests",
-	"import antigravity",
-	"if err != nil { return err }",
-	"Segmentation fault (core dumped)",
-	"sudo make me a sandwich",
-	"while (!asleep) { code(); }",
-	"rm -rf node_modules && pray",
-	"git commit -m \"fix\"",
-	"404: motivation not found",
-	"panic: not enough coffee",
-	"git blame yourself",
-	"0 errors, 0 warnings, 1 surprise",
-	"[ OK ] Reached target Vibes",
+// taglines are the jokes under the logo: taglines.txt, one per line, or the
+// user's own ~/.v/taglines.txt in its place.
+var taglines = loadTaglines()
+
+//go:embed taglines.txt
+var builtinTaglinesText string
+
+func splitTaglines(text string) []string {
+	var out []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func builtinTaglines() []string { return splitTaglines(builtinTaglinesText) }
+
+func loadTaglines() []string {
+	if b, err := os.ReadFile(filepath.Join(configDir(), "taglines.txt")); err == nil {
+		if t := splitTaglines(string(b)); len(t) > 1 {
+			return t
+		}
+	}
+	return builtinTaglines()
 }
 
 // gradient blends a into b; colors are "#rrggbb", t is in [0, 1].

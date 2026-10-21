@@ -177,7 +177,7 @@ func (a *codexAgent) response(m rpcMsg) {
 		_ = a.notify("initialized")
 		params := map[string]any{
 			"cwd": a.dir, "approvalPolicy": "on-request", "sandbox": "read-only",
-			"developerInstructions": systemPrompt,
+			"developerInstructions": chatPrompt(a.dir),
 		}
 		if a.resume != "" {
 			params["threadId"] = a.resume

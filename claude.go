@@ -56,7 +56,7 @@ func startClaude(dir string, s Settings, resume string, tools []mcpTool, system 
 		"--verbose",
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
-		"--append-system-prompt", strings.TrimSpace(systemPrompt+"\n\n"+system),
+		"--append-system-prompt", strings.TrimSpace(chatPrompt(dir)+"\n\n"+system),
 		"--model", model, "--effort", s.Effort,
 		"--thinking-display", "summarized", // without it thinking blocks come empty
 	)

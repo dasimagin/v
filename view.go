@@ -72,7 +72,7 @@ func (m *model) modeLabel() string {
 
 // openViewMenu also works outside a file: it picks the next file's view mode.
 func (m *model) openViewMenu() {
-	m.repoMenu, m.menu = nil, nil
+	m.repoMenu, m.menu, m.listMenu = nil, nil, nil
 	m.viewMenu = &viewMenu{sel: int(*m.curMode())}
 }
 

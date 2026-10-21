@@ -40,6 +40,7 @@ type workspacePicker struct {
 	focus            int    // row of the preview to bring into view
 	compose          *composeState
 	hits             map[int][]prHit // clickable spots in the PR preview, by row
+	rowLines         map[int]int     // diff line of each numbered preview row
 	seq              int
 }
 
@@ -102,6 +103,7 @@ func (m *model) closePicker(clear bool) {
 	if m.mode == modePick {
 		m.pop()
 	}
+	m.listMenu = nil
 	m.picker = nil
 	if clear {
 		m.omni.SetValue("")
@@ -396,7 +398,7 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "ctrl+l":
 		if p.kind == "prdiff" {
-			m.openListMenu()
+			m.setPRList(map[string]string{"files": "comments", "comments": "files"}[p.list])
 			return nil
 		}
 	case "shift+up", "shift+down":
@@ -617,6 +619,10 @@ func (m *model) previewPane(width, rows int) []string {
 			if raw := lines[n]; len(raw) == 1 && raw[0].tok == tokRaw {
 				text := ansi.Truncate(raw[0].text, width-1, "")
 				out[i] = text + blank(width-lipgloss.Width(text))
+			} else if c := p.compose; c != nil && c.kind == "line" && c.line != 0 && p.rowLines[n] >= c.start && p.rowLines[n] <= c.line {
+				// the lines a comment being written will apply to
+				tint := lipgloss.Color(cur.Sel)
+				out[i] = bg.Background(tint).Render(" ") + renderLineOn(raw, 0, width-1, tint, -1)
 			} else {
 				out[i] = bg.Render(" ") + renderLine(raw, 0, width-1)
 			}
@@ -687,17 +693,54 @@ func (m *model) listButton() string {
 		}
 	}
 	st := buttonStyle
-	if m.repoMenu != nil && m.repoMenu.kind == "list" {
+	if m.listMenu != nil {
 		st = buttonOpen
 	}
 	return st.Render(" " + label + " ▾ ")
 }
 
-func (m *model) openListMenu() {
+var prListNames = []string{"Files", "Comments"}
+
+// setPRList switches the left list of the PR screen between files and comments.
+func (m *model) setPRList(list string) {
 	p := m.picker
-	mu := &repoMenu{kind: "list", items: []repoItem{{label: "Files", index: 0}, {label: "Comments", index: 1}}}
-	if p.list == "comments" {
-		mu.sel = 1
+	if list == "" || list == p.list {
+		return
 	}
-	m.repoMenu, m.menu, m.viewMenu = mu, nil, nil
+	p.list, p.sel, p.top = list, 0, 0
+	m.listMenu = nil
+	m.rebuildPicker()
+}
+
+// openListMenu drops the Files/Comments menu below its header button.
+func (m *model) openListMenu() {
+	m.repoMenu, m.menu, m.viewMenu = nil, nil, nil
+	sel := 0
+	if m.picker.list == "comments" {
+		sel = 1
+	}
+	m.listMenu = &viewMenu{sel: sel}
+}
+
+func (m *model) listMenuKey(k string) {
+	n := len(prListNames)
+	switch k {
+	case "up", "shift+tab", "down", "tab":
+		m.listMenu.sel = (m.listMenu.sel + 1) % n // two entries: any move toggles
+	case "enter", " ":
+		m.setPRList([]string{"files", "comments"}[m.listMenu.sel])
+		m.listMenu = nil
+	case "esc", "ctrl+l":
+		m.listMenu = nil
+	}
+}
+
+// listMenuLayout is where the menu opens: under the list button, left of the view-mode one.
+func (m *model) listMenuLayout() (x, width int) {
+	width = 4
+	for _, n := range prListNames {
+		width = max(width, lipgloss.Width(n)+4)
+	}
+	right := m.w - lipgloss.Width(m.modeLabel()) - 2
+	return max(right-lipgloss.Width(m.listButton()), 0), width
 }

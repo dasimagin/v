@@ -11,7 +11,9 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 func TestGithubRepository(t *testing.T) {
@@ -207,7 +209,7 @@ func TestPRPreviewPlacesComments(t *testing.T) {
 		t.Fatalf("parse: %+v %v", d, err)
 	}
 	var texts []string
-	lines, _, _ := d.filePreview(d.Files[0], 60)
+	lines, _, _, _ := d.filePreview(d.Files[0], 60)
 	for _, line := range lines {
 		s := ""
 		for _, g := range line {
@@ -355,5 +357,174 @@ func TestCommentBodyIsTinted(t *testing.T) {
 	}
 	if w := ansi.StringWidth(lines[0]); w != 20 {
 		t.Errorf("width = %d, want a solid block of 20", w)
+	}
+}
+
+func TestListSwitchAndDropdownUnderTheHeader(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[]}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte("diff --git a/f.go b/f.go\n@@ -1 +1 @@\n-a\n+b\n"), []byte(`{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel()
+	m.w, m.h, m.mode = 140, 40, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	// ctrl+l just switches, no menu.
+	m.pickerKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.picker.list != "comments" || m.listMenu != nil || m.repoMenu != nil {
+		t.Fatalf("ctrl+l: list=%s menus=%v %v", m.picker.list, m.listMenu, m.repoMenu)
+	}
+	m.pickerKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.picker.list != "files" {
+		t.Error("ctrl+l must switch back")
+	}
+	// Clicking the header button opens the dropdown under it, not above the status line.
+	x, _ := m.listMenuLayout()
+	m.workspaceClick(x+1, toolbarRow)
+	if m.listMenu == nil || m.repoMenu != nil {
+		t.Fatal("the button must open the list menu")
+	}
+	view2 := m.overlayMenus(strings.Repeat(strings.Repeat(" ", m.w)+"\n", m.h-1) + strings.Repeat(" ", m.w))
+	rows := strings.Split(ansi.Strip(view2), "\n")
+	if !strings.Contains(rows[toolbarRow+1], "Files") || !strings.Contains(rows[toolbarRow+2], "Comments") {
+		t.Errorf("menu rows: %q %q", rows[toolbarRow+1], rows[toolbarRow+2])
+	}
+	// Picking Comments in it switches the list and closes it.
+	m.workspaceClick(x+1, toolbarRow+2)
+	if m.picker.list != "comments" || m.listMenu != nil {
+		t.Errorf("pick: list=%s menu=%v", m.picker.list, m.listMenu)
+	}
+}
+
+const rangeDiff = "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n" +
+	"@@ -1,4 +1,5 @@\n a\n b\n+c\n d\n e\n" +
+	"@@ -40,2 +41,3 @@\n x\n+y\n z\n"
+
+func TestCommentRanges(t *testing.T) {
+	f := splitDiff(rangeDiff)[0]
+	for _, c := range []struct {
+		start, end int
+		ok         bool
+	}{
+		{2, 4, true},   // inside the first hunk
+		{3, 3, true},   // one line
+		{4, 2, false},  // backwards
+		{1, 42, false}, // across hunks
+		{9, 10, false}, // not in the diff
+	} {
+		if got := f.rangeOK(c.start, c.end); got != c.ok {
+			t.Errorf("rangeOK(%d, %d) = %v, want %v", c.start, c.end, got, c.ok)
+		}
+	}
+}
+
+func TestRangeCommentFromClicksAndText(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[],"headRefOid":"abc"}`
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":4,"startLine":2,"comments":{"nodes":[` +
+		`{"databaseId":9,"author":{"login":"r"},"body":"this block","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(rangeDiff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th := d.Files[0].Threads[0]; th.Start != 2 || th.Line != 4 {
+		t.Fatalf("thread range = %d-%d", th.Start, th.Line)
+	}
+	// The lines a thread covers get a bar in the gutter, and the thread says which lines.
+	lines, _, _, _ := d.filePreview(d.Files[0], 80)
+	var marked, text []string
+	for _, l := range lines {
+		s := ""
+		for _, g := range l {
+			s += g.text
+		}
+		s = ansi.Strip(s)
+		text = append(text, s)
+		if strings.Contains(s, "▎") {
+			marked = append(marked, strings.TrimSpace(strings.SplitN(s, "▎", 2)[0]))
+		}
+	}
+	if strings.Join(marked, ",") != "2,3,4" || !strings.Contains(strings.Join(text, "\n"), "lines 2–4") {
+		t.Errorf("marked lines %v\n%s", marked, strings.Join(text, "\n"))
+	}
+
+	m := newModel()
+	m.w, m.h, m.mode = 140, 40, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	m.picker.sel = 1
+	lw := m.pickerListWidth()
+	m.pickerPreview()
+	rowOf := func(line int) int {
+		for r, n := range m.picker.rowLines {
+			if n == line {
+				return r
+			}
+		}
+		t.Fatalf("no row for line %d", line)
+		return 0
+	}
+	click := func(line int) {
+		m.previewClick(lw+1+1, headerRows+rowOf(line)-m.picker.pscroll)
+	}
+	click(2)
+	if c := m.picker.compose; c == nil || c.lines() != "2" {
+		t.Fatalf("first click: %+v", m.picker.compose)
+	}
+	click(4) // extends from the first line clicked
+	if c := m.picker.compose; c.start != 2 || c.line != 4 || c.lines() != "2–4" || !strings.Contains(c.hint, "2–4") {
+		t.Fatalf("extended: %+v", c)
+	}
+	click(3) // moving back keeps the anchor
+	if c := m.picker.compose; c.start != 2 || c.line != 3 {
+		t.Fatalf("shrunk: %+v", c)
+	}
+	// The picked lines are drawn on a tinted row (force colors: tests run without a terminal).
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	pane := m.previewPane(m.w-lw-1, m.bodyRows())
+	probe := lipgloss.NewStyle().Background(lipgloss.Color(cur.Sel)).Render("x")
+	selSeq := strings.TrimSuffix(strings.TrimPrefix(probe[:strings.Index(probe, "x")], "\x1b["), "m")
+	tinted := func(line int) bool {
+		return strings.Contains(pane[rowOf(line)-m.picker.pscroll], selSeq)
+	}
+	if !tinted(2) || !tinted(3) || tinted(4) {
+		t.Errorf("the selected lines must be tinted, and only they: %v %v %v\n%q\n%q", tinted(2), tinted(3), tinted(4), pane[rowOf(2)-m.picker.pscroll], pane[rowOf(4)-m.picker.pscroll])
+	}
+	m.picker.compose = nil
+	// Typed ranges are checked before anything is sent.
+	m.startCompose("new")
+	for text, wantErr := range map[string]bool{"2-4 fine": false, "1-42 across hunks": true, "9 not in the diff": true} {
+		m.setOmni(text)
+		cmd := m.sendCompose()
+		if (cmd == nil) != wantErr {
+			t.Errorf("%q: cmd=%v, want error=%v", text, cmd, wantErr)
+		}
+		if cmd != nil {
+			m.picker.compose = nil
+			m.startCompose("new")
+		}
+	}
+}
+
+func TestAgentCommentRange(t *testing.T) {
+	rv := testFlow(true)
+	rv.data.Files = splitDiff(rangeDiff)
+	out, err := callTool(t, rv, "pr_comment", `{"path":"f.go","start_line":2,"line":4,"level":"recommended","body":"this block"}`)
+	if err != nil || !strings.HasPrefix(out, "accepted") {
+		t.Fatalf("range comment: %q %v", out, err)
+	}
+	if _, err := callTool(t, rv, "pr_comment", `{"path":"f.go","start_line":2,"line":42,"level":"note","body":"x"}`); err == nil || !strings.Contains(err.Error(), "one stretch") {
+		t.Errorf("a range across hunks must be invalid: %v", err)
+	}
+	payload, _ := reviewPayload(rv.cards)
+	if !strings.Contains(string(payload), `"start_line":2`) || !strings.Contains(string(payload), `"start_side":"RIGHT"`) {
+		t.Errorf("payload = %s", payload)
+	}
+	if rv.cards[0].label != "f.go:2–4" {
+		t.Errorf("label = %q", rv.cards[0].label)
 	}
 }

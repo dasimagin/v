@@ -17,8 +17,22 @@ type composeState struct {
 	kind   string // "reply", "line" or "general"
 	thread prThread
 	file   prFile
-	line   int // a line picked by clicking it; 0 when the text starts with the number
+	line   int // last line picked by clicking; 0 when the text starts with the number
+	start  int // first line of a picked range, equal to line for a single line
+	anchor int // the line first clicked: further clicks extend the range from it
 	hint   string
+}
+
+// lines is the picked range as text: "42" or "100–120".
+func (c *composeState) lines() string {
+	if c.start > 0 && c.start < c.line {
+		return fmt.Sprintf("%d–%d", c.start, c.line)
+	}
+	return fmt.Sprint(c.line)
+}
+
+func (c *composeState) setHint() {
+	c.hint = fmt.Sprintf("comment on %s:%s · click another line to extend the range · enter sends it to GitHub · esc cancels", c.file.Path, c.lines())
 }
 
 type prComposedMsg struct {
@@ -29,7 +43,8 @@ type prComposedMsg struct {
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
-var lineComment = regexp.MustCompile(`^\s*(\d+)\s*[: ]\s*(.+)$`)
+// lineComment is "42 text", "42: text" or "100-120 text".
+var lineComment = regexp.MustCompile(`^\s*(\d+)(?:\s*-\s*(\d+))?\s*[: ]\s*(.+)$`)
 
 // composeReply starts a reply in a thread.
 func (m *model) composeReply(file prFile, t prThread) tea.Cmd {
@@ -42,8 +57,9 @@ func (m *model) composeReply(file prFile, t prThread) tea.Cmd {
 
 // composeLine starts a comment on one line of the new file.
 func (m *model) composeLine(file prFile, line int) tea.Cmd {
-	return m.beginCompose(&composeState{kind: "line", file: file, line: line,
-		hint: fmt.Sprintf("comment on %s:%d · enter sends it to GitHub · esc cancels", file.Path, line)})
+	c := &composeState{kind: "line", file: file, line: line, start: line, anchor: line}
+	c.setHint()
+	return m.beginCompose(c)
 }
 
 func (m *model) composeGeneral() tea.Cmd {
@@ -87,7 +103,7 @@ func (m *model) startCompose(kind string) tea.Cmd {
 		return nil
 	case file != nil:
 		return m.beginCompose(&composeState{kind: "line", file: *file,
-			hint: fmt.Sprintf("new comment on %s · type `<line> <text>` (line numbers are in the diff), or click a line · enter sends it · esc cancels", file.Path)})
+			hint: fmt.Sprintf("new comment on %s · type `<line> <text>` or `<from>-<to> <text>`, or click a line (and another to extend) · enter sends it · esc cancels", file.Path)})
 	}
 	return m.composeGeneral()
 }
@@ -96,7 +112,7 @@ func (m *model) startCompose(kind string) tea.Cmd {
 // line (a comment on it), or the New comment button.
 func (m *model) previewClick(x, y int) tea.Cmd {
 	p := m.picker
-	if p.pr == nil || p.compose != nil {
+	if p.pr == nil {
 		return nil
 	}
 	rel := x - (m.pickerListWidth() + 1)
@@ -104,6 +120,15 @@ func (m *model) previewClick(x, y int) tea.Cmd {
 	for _, h := range p.hits[row] {
 		if rel < h.x0 || rel >= h.x1 {
 			continue
+		}
+		if c := p.compose; c != nil {
+			// While a line comment is open, clicking another line of the same file
+			// stretches it from the first line clicked to this one.
+			if c.kind == "line" && c.line != 0 && h.kind == "line" && p.pr.Files[h.file].Path == c.file.Path {
+				c.start, c.line = min(c.anchor, h.line), max(c.anchor, h.line)
+				c.setHint()
+			}
+			return nil
 		}
 		switch h.kind {
 		case "general":
@@ -199,20 +224,27 @@ func (m *model) sendCompose() tea.Cmd {
 			return err
 		}
 	case "line":
-		line, comment := c.line, text
+		start, line, comment := c.start, c.line, text
 		if line == 0 {
 			mt := lineComment.FindStringSubmatch(text)
 			if mt == nil {
-				m.setErr("start with the line number, like `42 text`")
+				m.setErr("start with the line number, like `42 text` or `100-120 text`")
 				return nil
 			}
-			line, comment = atoi(mt[1]), strings.TrimSpace(mt[2])
+			start, line, comment = atoi(mt[1]), atoi(mt[1]), strings.TrimSpace(mt[3])
+			if mt[2] != "" {
+				line = atoi(mt[2])
+			}
 		}
-		if !c.file.newLines()[line] {
-			m.setErr(fmt.Sprintf("line %d is not in the diff of %s", line, c.file.Path))
+		if !c.file.rangeOK(start, line) {
+			m.setErr(fmt.Sprintf("lines %d–%d are not one stretch of the diff of %s (a comment range must stay inside one hunk)", start, line, c.file.Path))
 			return nil
 		}
-		body, _ := json.Marshal(map[string]any{"body": comment, "commit_id": d.HeadSHA, "path": c.file.Path, "line": line, "side": "RIGHT"})
+		review := map[string]any{"body": comment, "commit_id": d.HeadSHA, "path": c.file.Path, "line": line, "side": "RIGHT"}
+		if start < line {
+			review["start_line"], review["start_side"] = start, "RIGHT"
+		}
+		body, _ := json.Marshal(review)
 		post = func() error {
 			_, err := ghInput(dir, body, "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/comments", d.Repo, d.Number))
 			return err

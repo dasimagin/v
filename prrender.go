@@ -57,15 +57,22 @@ type boxEntry struct {
 	badges []badge
 }
 
+// boxHits are the clickable spots in the header row of a box, as columns
+// [x0, x1) from the left edge of the preview.
+type boxHits struct{ state, reply [2]int }
+
 // messageBox draws messages in a rounded frame, replies indented under the
-// first message. The frame takes the muted color when quiet is set.
-func messageBox(entries []boxEntry, quiet bool, width int, button string) previewLines {
+// first message. The frame takes the muted color when quiet is set. The first
+// header can carry a state button after its badges and a button at the right
+// edge; their positions are returned.
+func messageBox(entries []boxEntry, quiet bool, width int, state, button string) (previewLines, boxHits) {
 	frame := accentStyle
 	if quiet {
 		frame = hintStyle
 	}
 	author := accentStyle.Bold(true)
 	var out previewLines
+	var hits boxHits
 	for i, e := range entries {
 		corner := "╭─ "
 		if i > 0 {
@@ -78,8 +85,16 @@ func messageBox(entries []boxEntry, quiet bool, width int, button string) previe
 		for _, b := range e.badges {
 			head += b.render()
 		}
+		if i == 0 && state != "" {
+			head += bg.Render(" ")
+			x0 := 2 + lipgloss.Width(head)
+			head += state
+			hits.state = [2]int{x0, 2 + lipgloss.Width(head)}
+		}
 		if i == 0 && button != "" { // right-aligned, so it is easy to find and click
 			head += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(head)-lipgloss.Width(button)-2, 1))) + button
+			right := 2 + lipgloss.Width(head)
+			hits.reply = [2]int{right - lipgloss.Width(button), right}
 		}
 		out = append(out, rawLine(bg.Render("  ")+head))
 		panel := bg.Background(lipgloss.Color(cur.Panel))
@@ -91,64 +106,44 @@ func messageBox(entries []boxEntry, quiet bool, width int, button string) previe
 			out = append(out, rawLine(bg.Render("  ")+frame.Render("│")+panel.Render(" ")+l+panel.Render(" ")))
 		}
 	}
-	return append(out, rawLine(bg.Render("  ")+frame.Render("╰─")))
+	return append(out, rawLine(bg.Render("  ")+frame.Render("╰─"))), hits
 }
 
-// threadBox draws a review thread with its state.
-func threadBox(t prThread, width int) previewLines {
+// threadBox draws a review thread. Its state is a button: clicking it
+// resolves or reopens the thread.
+func threadBox(t prThread, width int) (previewLines, boxHits) {
 	var entries []boxEntry
 	for i, c := range t.Comments {
 		e := boxEntry{author: c.Author, at: c.At, body: c.Body}
-		if i == 0 {
-			switch {
-			case t.Resolved:
-				e.badges = append(e.badges, badge{"resolved", bg.Foreground(lipgloss.Color(cur.Added))})
-			default:
-				e.badges = append(e.badges, badge{"unresolved", bg.Foreground(lipgloss.Color(cur.Type))})
-			}
-			if t.Outdated {
-				e.badges = append(e.badges, badge{"outdated", hintStyle})
-			}
+		if i == 0 && t.Start > 0 && t.Start < t.Line {
+			e.badges = append(e.badges, badge{fmt.Sprintf("lines %d–%d", t.Start, t.Line), hintStyle})
+		}
+		if i == 0 && t.Outdated {
+			e.badges = append(e.badges, badge{"outdated", hintStyle})
 		}
 		if c.Pending {
 			e.badges = append(e.badges, badge{"pending", bg.Foreground(lipgloss.Color(cur.Type)).Bold(true)})
 		}
 		entries = append(entries, e)
 	}
-	button := ""
+	state, reply := "", ""
 	if t.ID != "" {
-		reply, resolve := threadButtons(t)
-		button = reply + bg.Render(" ") + resolve
+		state = stateButton(t)
+		reply = replyButton()
 	}
-	return messageBox(entries, t.Resolved, width, button)
+	return messageBox(entries, t.Resolved, width, state, reply)
 }
 
-// threadButtons are the Reply and Resolve (or Unresolve) buttons of a thread.
-func threadButtons(t prThread) (reply, resolve string) {
-	st := buttonStyle
+// stateButton shows whether a thread is resolved; clicking it flips that.
+func stateButton(t prThread) string {
 	if t.Resolved {
-		st = bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Fg)).Bold(true)
+		return bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Added)).Bold(true).Render(" ✓ resolved ")
 	}
-	return bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Fg)).Bold(true).Render(" Reply "), st.Render(threadButtonLabel(t))
+	return buttonStyle.Render(" ○ unresolved ")
 }
 
-// threadHits are where those buttons sit in a preview of the given width,
-// relative to its left edge: they are right-aligned in the thread's header row.
-func threadHits(t prThread, width int) (reply, resolve [2]int) {
-	r, s := threadButtons(t)
-	rw, sw := lipgloss.Width(r), lipgloss.Width(s)
-	right := width - 1
-	resolve = [2]int{right - sw, right}
-	reply = [2]int{right - sw - 1 - rw, right - sw - 1}
-	return
-}
-
-// threadButtonLabel is the text of the resolve toggle of a thread.
-func threadButtonLabel(t prThread) string {
-	if t.Resolved {
-		return " Unresolve "
-	}
-	return " Resolve "
+func replyButton() string {
+	return bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Fg)).Bold(true).Render(" Reply ")
 }
 
 func (t prThread) summary() string {

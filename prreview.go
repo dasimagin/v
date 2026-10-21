@@ -157,6 +157,36 @@ func (f prFile) newLines() map[int]bool {
 	return lines
 }
 
+// lineHunks maps each line of the new file that the diff shows to its hunk.
+func (f prFile) lineHunks() map[int]int {
+	hunks := map[int]int{}
+	n, hunk := 0, -1
+	for _, l := range f.Patch {
+		if m := hunkPattern.FindStringSubmatch(l); m != nil {
+			fmt.Sscan(m[2], &n)
+			hunk++
+			continue
+		}
+		if n == 0 || strings.HasPrefix(l, "diff --git") || strings.HasPrefix(l, "\\") {
+			continue
+		}
+		if !strings.HasPrefix(l, "-") {
+			hunks[n] = hunk
+			n++
+		}
+	}
+	return hunks
+}
+
+// rangeOK reports whether a comment can span lines start..end: GitHub needs
+// both ends in the diff, in the same hunk. start == end is a single line.
+func (f prFile) rangeOK(start, end int) bool {
+	hunks := f.lineHunks()
+	a, okA := hunks[start]
+	b, okB := hunks[end]
+	return okA && okB && a == b && start <= end
+}
+
 // excerpt is the diff lines around new-file line n of f: a few before it and one after.
 func (f prFile) excerpt(n int) (lines []string, target int) {
 	var hunk []string
@@ -193,7 +223,8 @@ func (f prFile) excerpt(n int) (lines []string, target int) {
 // in an existing thread.
 type reviewCard struct {
 	Path     string
-	Line     int
+	Line     int    // the last line of the comment
+	Start    int    // the first line of a multi-line comment, 0 for one line
 	Thread   string // set for a reply
 	Body     string // with its !! or ! prefix
 	Hunk     []string
@@ -277,7 +308,7 @@ type reviewActionMsg struct {
 func (rv *reviewFlow) propose(ctx context.Context, c *reviewCard) string {
 	rv.mu.Lock()
 	for _, o := range rv.cards {
-		if o.Thread == c.Thread && o.Path == c.Path && o.Line == c.Line && o.Body == c.Body {
+		if o.Thread == c.Thread && o.Path == c.Path && o.Line == c.Line && o.Start == c.Start && o.Body == c.Body {
 			rv.mu.Unlock()
 			return "duplicate: you already proposed exactly this comment"
 		}
@@ -596,15 +627,21 @@ func postReview(dir, repo string, number int, cards []*reviewCard, pending bool)
 // GitHub keeps pending: visible only to its author until submitted.
 func reviewPayload(cards []*reviewCard) ([]byte, int) {
 	type inline struct {
-		Path string `json:"path"`
-		Line int    `json:"line"`
-		Side string `json:"side"`
-		Body string `json:"body"`
+		Path      string `json:"path"`
+		Line      int    `json:"line"`
+		Side      string `json:"side"`
+		StartLine int    `json:"start_line,omitempty"`
+		StartSide string `json:"start_side,omitempty"`
+		Body      string `json:"body"`
 	}
 	comments := []inline{}
 	for _, c := range cards {
 		if c.Decision == "y" && c.Thread == "" {
-			comments = append(comments, inline{c.Path, c.Line, "RIGHT", c.Body})
+			in := inline{Path: c.Path, Line: c.Line, Side: "RIGHT", Body: c.Body}
+			if c.Start > 0 && c.Start < c.Line {
+				in.StartLine, in.StartSide = c.Start, "RIGHT"
+			}
+			comments = append(comments, in)
 		}
 	}
 	payload, _ := json.Marshal(map[string]any{"comments": comments})

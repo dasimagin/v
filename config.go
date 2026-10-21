@@ -279,7 +279,7 @@ func (m *model) cmdConfig(string) tea.Cmd {
 
 func (m *model) setTheme(t *Theme) {
 	applyTheme(t)
-	previews, prAnchors = map[string]previewEntry{}, map[string][]int{} // styled previews hold the old colors
+	previews, prAnchors, prLineRows, prBoxHits = map[string]previewEntry{}, map[string][]int{}, map[string]map[int]int{}, map[string][]boxHits{} // styled previews hold the old colors
 	m.styleOmni()
 }
 

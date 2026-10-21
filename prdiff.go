@@ -43,6 +43,7 @@ type prThread struct {
 	Resolved bool
 	Outdated bool
 	Line     int // in the new file; 0 when the line is gone
+	Start    int // first line of a multi-line thread, 0 for a single line
 	Comments []prComment
 }
 
@@ -177,7 +178,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 		return nil, err
 	}
 	for _, t := range res.Data.Repository.PullRequest.ReviewThreads.Nodes {
-		th := prThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Line: t.Line}
+		th := prThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Line: t.Line, Start: t.StartLine}
 		for _, c := range t.Comments.Nodes {
 			th.Comments = append(th.Comments, prComment{ID: c.DatabaseID, Author: c.Author.Login, Body: c.Body, At: c.CreatedAt, Pending: c.State == "PENDING"})
 		}
@@ -191,7 +192,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 }
 
 // threadsQuery reads the review threads of a PR: their state and every comment.
-const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:50){nodes{databaseId author{login} body createdAt state}}}}}}}`
+const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{databaseId author{login} body createdAt state}}}}}}}`
 
 type threadNode struct {
 	ID         string
@@ -199,6 +200,7 @@ type threadNode struct {
 	IsOutdated bool
 	Path       string
 	Line       int
+	StartLine  int
 	Comments   struct {
 		Nodes []struct {
 			DatabaseID int64
@@ -249,7 +251,7 @@ func wrapped(text string, width int) []string {
 // filePreview is the file's patch, with a gutter of new-file line numbers and
 // each review thread under the line it belongs to. anchors holds the row of
 // every thread, by its index in f.Threads.
-func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]int) {
+func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]int, []boxHits) {
 	lineAt := map[int]int{} // row of each numbered diff line -> its line in the new file
 	byLine := map[int][]int{}
 	var loose []int
@@ -261,6 +263,16 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 		byLine[t.Line] = append(byLine[t.Line], i)
 	}
 	anchors := make([]int, len(f.Threads))
+	hits := make([]boxHits, len(f.Threads))
+	// The lines a thread covers get a bar in the gutter; an open thread wins over a closed one.
+	covered := map[int]bool{} // line -> thread is resolved
+	for _, t := range f.Threads {
+		for n := max(t.Start, 1); t.Line > 0 && n <= t.Line; n++ {
+			if prev, seen := covered[n]; !seen || prev {
+				covered[n] = t.Resolved
+			}
+		}
+	}
 	var out previewLines
 	newN := 0
 	patch := false
@@ -290,6 +302,13 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 			gutter = fmt.Sprintf("%4d ", no)
 		}
 		line := []seg{{gutter, chroma.Comment}}
+		if resolved, ok := covered[no]; ok && no > 0 {
+			bar := chroma.LiteralString
+			if resolved {
+				bar = chroma.Comment
+			}
+			line = []seg{{gutter[:4], chroma.Comment}, {"▎", bar}}
+		}
 		if l != "" {
 			line = append(line, seg{l, tok})
 		}
@@ -299,17 +318,21 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 		out = append(out, line)
 		for _, i := range byLine[no] {
 			anchors[i] = len(out)
-			out = append(out, threadBox(f.Threads[i], width)...)
+			box, h := threadBox(f.Threads[i], width)
+			out = append(out, box...)
+			hits[i] = h
 		}
 	}
 	if len(loose) > 0 {
 		out = append(out, nil, []seg{{"Outdated", chroma.Comment}})
 		for _, i := range loose {
 			anchors[i] = len(out)
-			out = append(out, threadBox(f.Threads[i], width)...)
+			box, h := threadBox(f.Threads[i], width)
+			out = append(out, box...)
+			hits[i] = h
 		}
 	}
-	return out, anchors, lineAt
+	return out, anchors, lineAt, hits
 }
 
 // conversationPreview is the PR itself: description, reviews and general comments.
@@ -343,11 +366,13 @@ func (d *prData) conversationPreview(width int) previewLines {
 		}
 		label := strings.ToLower(strings.ReplaceAll(r.State, "_", " "))
 		out = append(out, nil)
-		out = append(out, messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width, "")...)
+		box, _ := messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width, "", "")
+		out = append(out, box...)
 	}
 	for _, c := range d.Comments {
 		out = append(out, nil)
-		out = append(out, messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width, "")...)
+		box, _ := messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width, "", "")
+		out = append(out, box...)
 	}
 	return out
 }
@@ -357,6 +382,7 @@ func (d *prData) conversationPreview(width int) previewLines {
 var (
 	prAnchors  = map[string][]int{}
 	prLineRows = map[string]map[int]int{}
+	prBoxHits  = map[string][]boxHits{}
 )
 
 // prHit is a clickable spot in the preview: columns [x0, x1) of a row.
@@ -374,7 +400,7 @@ type prHit struct {
 func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	d := p.pr
 	p.focus = 0
-	p.hits = map[int][]prHit{}
+	p.hits, p.rowLines = map[int][]prHit{}, nil
 	if d == nil {
 		return nil
 	}
@@ -393,23 +419,23 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	if fileAt >= 0 && fileAt < len(d.Files) {
 		f := d.Files[fileAt]
 		lines := cachedPreview(key, 0, func() previewLines {
-			lines, anchors, lineAt := d.filePreview(f, width)
-			prAnchors[key], prLineRows[key] = anchors, lineAt
+			lines, anchors, lineAt, hits := d.filePreview(f, width)
+			prAnchors[key], prLineRows[key], prBoxHits[key] = anchors, lineAt, hits
 			return lines
 		})
 		anchors := prAnchors[key]
 		if commentAt >= 0 && commentAt < len(anchors) {
 			p.focus = anchors[commentAt]
 		}
+		p.rowLines = prLineRows[key]
 		for row, line := range prLineRows[key] {
 			p.hits[row] = append(p.hits[row], prHit{x0: 0, x1: width, kind: "line", file: fileAt, line: line})
 		}
 		for ti, row := range anchors {
-			if t := f.Threads[ti]; t.ID != "" {
-				reply, resolve := threadHits(t, width)
+			if t, h := f.Threads[ti], prBoxHits[key][ti]; t.ID != "" {
 				p.hits[row] = append(p.hits[row],
-					prHit{x0: reply[0], x1: reply[1], kind: "reply", file: fileAt, thread: ti},
-					prHit{x0: resolve[0], x1: resolve[1], kind: "resolve", file: fileAt, thread: ti})
+					prHit{x0: h.reply[0], x1: h.reply[1], kind: "reply", file: fileAt, thread: ti},
+					prHit{x0: h.state[0], x1: h.state[1], kind: "resolve", file: fileAt, thread: ti})
 			}
 		}
 		return lines

@@ -73,6 +73,7 @@ type model struct {
 	vmode    viewMode  // flat or diff, kept across files
 	rmode    viewMode  // the same for reviews of agent edits
 	viewMenu *viewMenu // open view-mode dropdown
+	listMenu *viewMenu // open Files/Comments dropdown of the PR screen
 	stack    []screen  // screens to return to with Esc
 
 	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
@@ -252,6 +253,10 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.viewMenu != nil {
 		m.viewMenuKey(k)
+		return m, nil
+	}
+	if m.listMenu != nil {
+		m.listMenuKey(k)
 		return m, nil
 	}
 	if k == "ctrl+t" {

@@ -252,14 +252,16 @@ func prTools(rv *reviewFlow) []mcpTool {
 		{
 			Name: toolPrefix + "comment",
 			Description: "Propose an inline review comment on a line of the new file that appears in the diff (use the numbers from pr_diff). " +
+				"For a comment about several lines, also give start_line: the comment then covers start_line to line, and both must be in the same hunk. " +
 				"The user may reject it; the result says so. level is critical, recommended or note.",
-			Schema: `{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"level":{"type":"string","enum":["critical","recommended","note"]},"body":{"type":"string"}},"required":["path","line","level","body"]}`,
+			Schema: `{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"start_line":{"type":"integer"},"level":{"type":"string","enum":["critical","recommended","note"]},"body":{"type":"string"}},"required":["path","line","level","body"]}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var a struct {
-					Path  string
-					Line  int
-					Level string
-					Body  string
+					Path      string
+					Line      int
+					StartLine int `json:"start_line"`
+					Level     string
+					Body      string
 				}
 				if err := decode(raw, &a); err != nil {
 					return "", err
@@ -268,15 +270,26 @@ func prTools(rv *reviewFlow) []mcpTool {
 				if err != nil {
 					return "", err
 				}
+				start := a.StartLine
+				if start == 0 || start == a.Line {
+					start = a.Line
+				}
 				if !f.newLines()[a.Line] {
 					return "", fmt.Errorf("invalid: line %d of %s is not in the diff; comments can only attach to lines shown by %sdiff", a.Line, a.Path, toolPrefix)
+				}
+				if !f.rangeOK(start, a.Line) {
+					return "", fmt.Errorf("invalid: lines %d to %d of %s are not one stretch of the diff; a range must start before it ends and stay inside one hunk", start, a.Line, a.Path)
 				}
 				if strings.TrimSpace(a.Body) == "" {
 					return "", fmt.Errorf("invalid: the comment is empty")
 				}
 				c := &reviewCard{Path: a.Path, Line: a.Line, Body: levelPrefix(a.Level) + strings.TrimSpace(a.Body)}
-				c.Hunk, c.Target = f.excerpt(a.Line)
 				c.label = fmt.Sprintf("%s:%d", a.Path, a.Line)
+				if start < a.Line {
+					c.Start = start
+					c.label = fmt.Sprintf("%s:%d–%d", a.Path, start, a.Line)
+				}
+				c.Hunk, c.Target = f.excerpt(a.Line)
 				return rv.propose(ctx, c), nil
 			},
 		},

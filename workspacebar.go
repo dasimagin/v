@@ -122,13 +122,6 @@ func (m *model) repoMenuKey(msg tea.KeyMsg) tea.Cmd {
 		if n > 0 {
 			it := items[mu.sel]
 			m.repoMenu = nil
-			if mu.kind == "list" {
-				if p := m.picker; p != nil {
-					p.list, p.sel, p.top = []string{"files", "comments"}[it.index], 0, 0
-					m.rebuildPicker()
-				}
-				return nil
-			}
 			if o, ok := agentOptions[mu.kind]; ok {
 				changed := o.get(m) != it.index
 				_ = o.set(m, it.index)
@@ -266,7 +259,7 @@ func (m *model) renderRepoMenu() []string {
 		s = truncate(s, max(width-1, 1))
 		return st.Render(s + strings.Repeat(" ", max(width-lipgloss.Width(s), 0)))
 	}
-	title := map[string]string{"pr": "Pull requests", "model": "Model", "effort": "Effort", "list": "Show in the list"}[mu.kind]
+	title := map[string]string{"pr": "Pull requests", "model": "Model", "effort": "Effort"}[mu.kind]
 	if title == "" {
 		title = "Branches"
 	}
@@ -294,8 +287,8 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 		if m.mode == modePick && m.picker != nil && m.picker.kind == "prdiff" {
 			right := m.w - lipgloss.Width(m.modeLabel()) - 2 // the gap before the view-mode button
 			if x < right && x >= right-lipgloss.Width(m.listButton()) {
-				if m.repoMenu != nil && m.repoMenu.kind == "list" {
-					m.repoMenu = nil
+				if m.listMenu != nil {
+					m.listMenu = nil
 				} else {
 					m.openListMenu()
 				}
@@ -335,6 +328,16 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 				return true, nil
 			}
 		}
+	}
+	if m.listMenu != nil {
+		left, width := m.listMenuLayout()
+		if i := y - toolbarRow - 1; i >= 0 && i < len(prListNames) && x >= left && x < left+width {
+			m.listMenu.sel = i
+			m.listMenuKey("enter")
+		} else {
+			m.listMenu = nil
+		}
+		return true, nil
 	}
 	if m.viewMenu != nil {
 		if i := y - toolbarRow - 1; i >= 0 && i < len(viewModeNames) && x >= m.w-menuWidth()-1 {
@@ -376,6 +379,17 @@ func (m *model) overlayMenus(view string) string {
 		x, _ := m.repoMenuLayout()
 		for i, line := range m.renderRepoMenu() {
 			put(x, m.repoMenuTop()+i, line)
+		}
+	}
+	if m.listMenu != nil {
+		x, width := m.listMenuLayout()
+		for i, name := range prListNames {
+			mark, st := "  ", bg.Background(lipgloss.Color(cur.Panel)).Foreground(lipgloss.Color(cur.Fg))
+			if i == m.listMenu.sel {
+				mark, st = "› ", buttonStyle
+			}
+			text := truncate(mark+name, width)
+			put(x, toolbarRow+1+i, st.Render(text+strings.Repeat(" ", max(width-lipgloss.Width(text), 0))))
 		}
 	}
 	if m.viewMenu != nil {

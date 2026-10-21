@@ -149,15 +149,16 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 		m.noteErr(err.Error())
 		return nil
 	}
+	auto := m.settings.ApplyMode == reviewAuto
+	if !m.enterRun("apply", fmt.Sprintf("PR #%d", d.Number), auto) {
+		return nil
+	}
+	// A fresh agent on its own screen: it starts empty, with v's pr_* tools.
 	rv := &reviewFlow{apply: true, url: d.URL, repo: d.Repo, number: d.Number, dir: m.repo.Root, data: d,
-		auto: m.settings.ApplyMode == reviewAuto, out: make(chan tea.Msg, 64), running: true}
-	m.rv = rv
+		auto: auto, out: make(chan tea.Msg, 64), running: true}
+	m.rv, m.runScr.rv = rv, rv
 	m.hub.set(rv)
 	m.toolsOn = true
-	if m.agent != nil && !m.agentHasTools {
-		m.agentStale = true // reconnect on the same session, now with the tools
-	}
-	m.showChat()
 	noun := "threads"
 	if len(refs) == 1 {
 		noun = "thread"
@@ -166,12 +167,31 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 	if rv.auto {
 		mode = "on its own"
 	}
-	m.note(fmt.Sprintf("handing %d review %s to the agent, working %s · experimental", len(refs), noun, mode))
+	m.note(fmt.Sprintf("handing %d review %s to a fresh agent, working %s · type to guide it, esc leaves", len(refs), noun, mode))
 	cmd := m.prompt(applyPrompt(d, refs, m.repo.Branch, rv.auto))
+	m.armRun(rv)
+	return tea.Batch(cmd, rv.wait())
+}
+
+// armRun points the run's cancel at the current agent.
+func (m *model) armRun(rv *reviewFlow) {
 	if a := m.agent; a != nil {
 		rv.cancel = func() { _ = a.Interrupt() }
 	}
-	return tea.Batch(cmd, rv.wait())
+}
+
+// resumeRunTurn readies the run for another turn, started by a message the
+// user types once the previous one is over: the agent's tools work again and
+// its questions reach the user.
+func (m *model) resumeRunTurn() tea.Cmd {
+	r := m.runScr
+	if r == nil || r.rv == nil || m.rv != nil {
+		return nil
+	}
+	rv := r.rv
+	rv.running, rv.dropped = true, false
+	m.rv = rv
+	return rv.wait()
 }
 
 // applyPermission answers the agent's tool requests during an apply run.
@@ -197,14 +217,15 @@ func (m *model) applyPermission(p *permission) bool {
 	return true
 }
 
-// finishApply ends the run when the agent's turn does.
+// finishApply ends the agent's turn in an apply run. The run itself goes on
+// until you leave: type again to guide the agent further.
 func (m *model) finishApply() {
 	rv := m.rv
 	if rv == nil || !rv.apply {
 		return
 	}
 	m.rv = nil
-	m.hub.set(nil)
+	rv.running, rv.ask = false, nil
 	select {
 	case rv.out <- reviewEndMsg{rv}: // lets the waiting command return
 	default:

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -156,8 +158,11 @@ func TestFinishApplyReleasesTheRun(t *testing.T) {
 	m.rv = rv
 	m.hub.set(rv)
 	m.finishApply()
-	if m.rv != nil || m.hub.get() != nil {
-		t.Error("the run must be cleared")
+	if m.rv != nil {
+		t.Error("the turn must be over")
+	}
+	if m.hub.get() == nil {
+		t.Error("the run's tools stay available until it is left")
 	}
 	if _, ok := (<-rv.out).(reviewEndMsg); !ok {
 		t.Error("the waiting command must be released")
@@ -184,5 +189,73 @@ func TestThreadLabelNamesThePlace(t *testing.T) {
 	}
 	if got := rv.threadLabel("nope"); got != "thread nope" {
 		t.Errorf("unknown = %q", got)
+	}
+}
+
+func TestRunScreenKeepsTheChatAside(t *testing.T) {
+	m := newModel()
+	m.w, m.h, m.mode = 100, 30, modeChat
+	m.hub = &applyHub{}
+	m.log = []message{{kind: msgUser, text: "my own conversation"}}
+	m.sessionID = "main-session"
+	m.queue = []string{"later"}
+	if !m.enterRun("apply", "PR #7", true) {
+		t.Fatal("could not enter the run")
+	}
+	if len(m.log) != 0 || m.sessionID != "" || m.queue != nil || m.agent != nil {
+		t.Errorf("the run must start empty: log=%d session=%q", len(m.log), m.sessionID)
+	}
+	m.note("the run says hello")
+	if m.enterRun("review", "PR #8", false) {
+		t.Error("a second run must be refused while one is open")
+	}
+	if title := ansi.Strip(strings.Join(m.chatHeader(), "\n")); !strings.Contains(title, "Apply · PR #7") || !strings.Contains(title, "esc to leave") {
+		t.Errorf("header = %q", title)
+	}
+	// Esc on an idle run leaves it.
+	next, _ := m.key(tea.KeyMsg{Type: tea.KeyEsc}) // key has a value receiver: take the result
+	m = next.(model)
+	if m.runScr != nil {
+		t.Fatal("esc must leave a finished run")
+	}
+	if len(m.log) < 1 || m.log[0].text != "my own conversation" || m.sessionID != "main-session" || !m.resumeNext || len(m.queue) != 1 {
+		t.Errorf("the chat must be back: log=%v session=%q resume=%v", m.log, m.sessionID, m.resumeNext)
+	}
+	if !strings.Contains(m.workspaceNotice, "/apply") {
+		t.Errorf("the chat agent must be told about the run: %q", m.workspaceNotice)
+	}
+	if m.toolsOn {
+		t.Error("the chat agent must not keep the run's tools")
+	}
+}
+
+func TestRunScreenRoutesTypingAndBlocksCommands(t *testing.T) {
+	m := newModel()
+	m.w, m.h, m.mode = 100, 30, modeChat
+	m.hub = &applyHub{}
+	m.enterRun("apply", "PR #7", false)
+	rv := &reviewFlow{apply: true, running: true, out: make(chan tea.Msg, 4)}
+	m.rv, m.runScr.rv = rv, rv
+	m.busy = true
+	// While the agent works, typed text is a note delivered with its next tool result.
+	if cmd := m.run("keep the diff small"); cmd != nil {
+		t.Error("a note is not a prompt")
+	}
+	if got := rv.takeNotes(); got != "keep the diff small" {
+		t.Errorf("note = %q", got)
+	}
+	// Commands that would change the ground under the run are refused.
+	m.setErr("")
+	m.run("/reset")
+	if !strings.Contains(m.status, "leave the apply run") {
+		t.Errorf("status = %q", m.status)
+	}
+	// Esc while the agent works stops it (and keeps the screen), a later Esc leaves.
+	stopped := false
+	rv.cancel = func() { stopped = true }
+	next, _ := m.key(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if m.runScr == nil || !rv.dropped || !stopped {
+		t.Error("esc must stop the agent, not leave")
 	}
 }

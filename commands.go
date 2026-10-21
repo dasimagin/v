@@ -114,10 +114,16 @@ func (m *model) run(input string) tea.Cmd {
 		m.mode = modeChat
 	}
 	m.log = append(m.log, message{kind: msgUser, text: input})
-	if !strings.HasPrefix(input, "/") && m.rv != nil && !m.rv.apply && m.rv.running && !m.rv.dropped {
-		m.rv.addNote(input) // steers the review, not the chat agent
-		m.note("note for the reviewer · it sees it with its next tool result")
+	if !strings.HasPrefix(input, "/") && m.rv != nil && m.rv.running && !m.rv.dropped && (!m.rv.apply || m.busy) {
+		m.rv.addNote(input) // reaches the agent with its next tool result, mid-turn
+		m.note("note for the agent · it sees it with its next tool result")
 		return nil
+	}
+	if m.runScr != nil && strings.HasPrefix(input, "/") {
+		if name, _, _ := strings.Cut(input[1:], " "); runBlocked[name] {
+			m.setErr("leave the " + m.runScr.kind + " run first (esc)")
+			return nil
+		}
 	}
 	if !strings.HasPrefix(input, "/") {
 		// The reply streams into the chat, so show it.
@@ -125,7 +131,8 @@ func (m *model) run(input string) tea.Cmd {
 			m.push()
 			m.mode = modeChat
 		}
-		return m.prompt(input)
+		wait := m.resumeRunTurn() // a message in a finished run starts its next turn
+		return tea.Batch(wait, m.prompt(input))
 	}
 	name, arg, _ := strings.Cut(input[1:], " ")
 	c := findCommand(name)

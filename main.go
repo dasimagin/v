@@ -45,6 +45,7 @@ type model struct {
 	repoMenu                             *repoMenu
 	picker                               *workspacePicker
 	rv                                   *reviewFlow // /review or /apply in progress
+	runScr                               *runScreen  // the run on screen, if any
 	hub                                  *applyHub   // points the chat agent's pr_* tools at the /apply run
 	toolsOn                              bool        // the chat agent gets v's pr_* tools (from the first /apply)
 	agentHasTools                        bool        // the running agent was started with them
@@ -271,7 +272,11 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.rv != nil && !m.rv.waiting() && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" && k == "esc" {
-		m.reviewEsc() // stop a running review
+		m.reviewEsc() // stop a running review or apply
+		return m, nil
+	}
+	if m.runScr != nil && m.rv == nil && !m.busy && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" && k == "esc" {
+		m.leaveRun() // the run is over: back to the chat
 		return m, nil
 	}
 	if !m.showChoices() {
@@ -526,7 +531,7 @@ func (m model) View() string {
 			line(l)
 		}
 	case modeChat:
-		for _, l := range m.header("", "", "") {
+		for _, l := range m.chatHeader() {
 			line(l)
 		}
 		for _, l := range m.renderLog(rows) {
@@ -587,8 +592,10 @@ func (m model) hint() string {
 	switch {
 	case m.reviewAsking():
 		return "↑↓ choose · enter answer · tab add a note for Claude · esc skip this comment"
-	case m.rv != nil && !m.rv.apply && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
-		return "Claude is reviewing… · type a note for it · esc stops"
+	case m.rv != nil && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
+		return "the agent is working… · type a note for it · esc stops"
+	case m.runScr != nil && m.rv == nil && !m.busy && m.perm == nil && m.mode == modeChat:
+		return "type to guide the agent further · esc leaves the " + m.runScr.kind + " run"
 	case m.mode == modePick:
 		switch m.picker.kind {
 		case "workdir":

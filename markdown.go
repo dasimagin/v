@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -42,11 +41,11 @@ func markdown(text string, width int) []string {
 	if err != nil {
 		return strings.Split(text, "\n")
 	}
-	keepBg := "\x1b[0m" + bgSeq(cur.Bg)
+	keepBg := "\x1b[0m" + themeBg()
 	out = strings.ReplaceAll(out, "\x1b[0m", keepBg)
 	lines := strings.Split(out, "\n")
 	for i, l := range lines {
-		lines[i] = bgSeq(cur.Bg) + strings.TrimRight(xansi.Truncate(l, width, ""), " ")
+		lines[i] = themeBg() + strings.TrimRight(xansi.Truncate(l, width, ""), " ")
 	}
 	// Drop the blank lines glamour puts around the document.
 	for len(lines) > 0 && xansi.Strip(lines[0]) == "" {
@@ -58,10 +57,51 @@ func markdown(text string, width int) []string {
 	return lines
 }
 
-// bgSeq is the escape sequence that sets a "#rrggbb" background.
+// markdownOn renders markdown on a block of the panel color: every line is
+// padded to width, so the tint forms a solid rectangle.
+func markdownOn(text string, width int) []string {
+	lines := markdown(text, width)
+	plain, tint := themeBg(), bgSeq(cur.Panel)
+	for i, l := range lines {
+		if plain != "" {
+			l = strings.ReplaceAll(l, plain, tint)
+		} else { // no background of ours to swap: put the tint back after every reset
+			l = strings.ReplaceAll(l, "\x1b[0m", "\x1b[0m"+tint)
+		}
+		lines[i] = l + bgSeq(cur.Panel) + strings.Repeat(" ", max(width-xansi.StringWidth(l), 0)) + "\x1b[0m"
+	}
+	return lines
+}
+
+// themeBg is the sequence for the screen's background: the theme's, or none
+// when the terminal's own is used.
+func themeBg() string {
+	if transparentBG {
+		return ""
+	}
+	return bgSeq(cur.Bg)
+}
+
+// bgSeqs caches the background sequences by color and color profile.
+var bgSeqs = map[string]string{}
+
+// bgSeq is the escape sequence that sets a "#rrggbb" background, in the color
+// profile of the terminal: the sequence lipgloss itself writes for the same
+// color, so the pieces we assemble by hand match the rest of the screen
+// (a terminal with 256 colors gets the nearest of them, not a 24-bit color it
+// would draw differently, or not at all).
 func bgSeq(hex string) string {
-	v, _ := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", v>>16&0xff, v>>8&0xff, v&0xff)
+	key := fmt.Sprintf("%s|%d", hex, lipgloss.ColorProfile())
+	if seq, ok := bgSeqs[key]; ok {
+		return seq
+	}
+	probe := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("x")
+	seq := ""
+	if i := strings.Index(probe, "x"); i > 0 {
+		seq = probe[:i]
+	}
+	bgSeqs[key] = seq
+	return seq
 }
 
 // mdStyle is glamour's dark style recolored with the theme.
@@ -120,3 +160,14 @@ func mdStyle(t *Theme) ansi.StyleConfig {
 }
 
 func uintPtr(u uint) *uint { return &u }
+
+// onThemeBg keeps the theme background behind rendered text that resets its
+// styles: the input field pads itself with unstyled spaces, which would show
+// as a stripe of the terminal's own background.
+func onThemeBg(s string) string {
+	on := themeBg()
+	if on == "" {
+		return s
+	}
+	return on + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+on)
+}

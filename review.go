@@ -15,10 +15,13 @@ var reviewTools = map[string]bool{"Edit": true, "MultiEdit": true, "Write": true
 
 // proposedDoc builds the file as it would be after the agent's tool call,
 // with the current file as its diff base. Nothing is written.
-func proposedDoc(tool string, in map[string]any) (*Doc, error) {
+func proposedDoc(tool string, in map[string]any, dirs ...string) (*Doc, error) {
 	path, _ := in["file_path"].(string)
 	if path == "" {
 		return nil, errors.New("no file_path")
+	}
+	if len(dirs) > 0 {
+		path = workPath(dirs[0], path)
 	}
 	cur, err := os.ReadFile(path)
 	exists := err == nil

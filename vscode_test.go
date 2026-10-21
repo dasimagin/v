@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,15 +24,6 @@ func TestBuiltinThemes(t *testing.T) {
 		}},
 		{"one-dark-pro", Theme{
 			Name: "One Dark Pro", Bg: "#282c34", Panel: "#21252b", Fg: "#abb2bf", Comment: "#7f848e", CommentItalic: true,
-		}},
-		{"one-light", Theme{
-			Name: "One Light", Bg: "#fafafa", Panel: "#eaeaeb", Fg: "#383a42", Accent: "#526fff",
-			Keyword: "#a626a4", Func: "#4078f2", String: "#50a14f", Comment: "#a0a1a7", CommentItalic: true,
-		}},
-		{"github-light-default", Theme{
-			Name: "GitHub Light Default", Bg: "#ffffff", Panel: "#f6f8fa", Fg: "#1f2328", Muted: "#656d76",
-			Accent: "#0969da", Accent2: "#8250df", Error: "#cf222e",
-			Keyword: "#cf222e", Func: "#8250df", String: "#0a3069", Number: "#0550ae", Type: "#953800",
 		}},
 	}
 	for _, tt := range tests {
@@ -67,6 +59,39 @@ func TestBuiltinThemes(t *testing.T) {
 			t.Errorf("%s: comments should be italic", tt.id)
 		}
 	}
+}
+
+func TestLightThemesAreNotSupported(t *testing.T) {
+	if err := loadThemes(""); err != nil {
+		t.Fatal(err)
+	}
+	for _, th := range themes {
+		if isLight(th.Bg) {
+			t.Errorf("the built-in theme %s is light (%s)", th.Name, th.Bg)
+		}
+	}
+	for _, id := range []string{"one-light", "github-light-default"} {
+		if findTheme(id) != nil {
+			t.Errorf("%s must be gone", id)
+		}
+	}
+	for hex, want := range map[string]bool{"#ffffff": true, "#fafafa": true, "#f6f8fa": true, "#23272e": false, "#282c34": false, "#0d1117": false, "#808080": false, "oops": false} {
+		if isLight(hex) != want {
+			t.Errorf("isLight(%s) = %v", hex, !want)
+		}
+	}
+	// A light theme dropped into the user's folder is skipped, with a reason, and the dark ones still load.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "bright.json"), []byte(`{"name":"Bright","colors":{"editor.background":"#ffffff","editor.foreground":"#000000"}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "night.json"), []byte(`{"name":"Night","colors":{"editor.background":"#101010","editor.foreground":"#eeeeee"}}`), 0o644)
+	err := loadThemes(dir)
+	if err == nil || !strings.Contains(err.Error(), "bright.json") || !strings.Contains(err.Error(), "light themes are not supported") {
+		t.Errorf("error = %v", err)
+	}
+	if findTheme("bright") != nil || findTheme("night") == nil {
+		t.Error("the light theme is skipped, the dark one is kept")
+	}
+	loadThemes("") // back to the built-in set for the other tests
 }
 
 func TestUserThemeOverridesAndErrors(t *testing.T) {

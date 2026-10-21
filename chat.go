@@ -13,6 +13,11 @@ type message struct {
 	text   string
 	answer string // for msgAsk once answered: "y", "n" or "e" (saved the user's version)
 
+	// A review comment (msgFinding): where, the diff around it, and the commented line in it.
+	file  string
+	view  diffView // the diff around it
+	quote []string // for a reply: the thread it answers
+
 	// Rendered markdown of an agent reply, reused while text, width and
 	// theme stay the same.
 	md      []string
@@ -30,6 +35,7 @@ const (
 	msgAsk                     // a tool call waiting for, or given, the user's answer
 	msgThinking                // the model's thinking, collapsed unless expanded
 	msgError                   // an error from the agent or a tool
+	msgFinding                 // a review comment with its diff, waiting for y or n
 )
 
 // note adds a message from v to the chat log.
@@ -108,6 +114,66 @@ func (m *model) renderLog(rows int) []string {
 				lines = append(lines, chatLine{errStyle.Render("✗ "), toolLine(msg.text, hintStyle, dim), bg})
 			case "e":
 				lines = append(lines, chatLine{accentStyle.Render("✎ "), toolLine(msg.text, hintStyle, dim) + dim.Render(" · your version"), bg})
+			}
+		case msgFinding:
+			gap()
+			mark := bg.Foreground(c(cur.Type)).Bold(true).Render("? ")
+			switch msg.answer {
+			case "y":
+				mark = bg.Foreground(c(cur.Added)).Render("✓ ")
+			case "n":
+				mark = errStyle.Render("✗ ")
+			}
+			lines = append(lines, chatLine{mark, bg.Foreground(c(cur.Fg)).Bold(true).Render(truncate(msg.file, width)), bg})
+			comment := func() {
+				frame := bg.Foreground(c(cur.Accent))
+				who := "Claude"
+				if msg.file != "" && strings.HasPrefix(msg.file, "reply") {
+					who = "Claude · reply"
+				}
+				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╭─ ") + frame.Bold(true).Render(who), bg})
+				body := markdownOn(strings.TrimSpace(msg.text), width-8)
+				if len(body) == 0 {
+					body = []string{""}
+				}
+				if mark, _ := splitLevel(msg.text); mark != "" {
+					body[0] = colorMark(body[0], mark)
+				}
+				panel := bg.Background(c(cur.Panel))
+				for _, l := range body {
+					lines = append(lines, chatLine{dim.Render("│ "), frame.Render("│") + panel.Render(" ") + l + panel.Render(" "), bg})
+				}
+				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╰─"), bg})
+			}
+			// The diff around the comment, with line numbers and a bar along the lines
+			// it is about; the comment sits under the last of them.
+			v := msg.view
+			if v.empty() {
+				comment() // not on a diff line
+			}
+			for j, l := range v.Lines {
+				st := dim
+				switch {
+				case strings.HasPrefix(l, "+"):
+					st = bg.Foreground(c(cur.Added))
+				case strings.HasPrefix(l, "-"):
+					st = bg.Foreground(c(cur.Deleted))
+				}
+				num, bar := "     ", bg.Render(" ")
+				if v.Nums[j] > 0 {
+					num = fmt.Sprintf("%4d ", v.Nums[j])
+				}
+				if j >= v.From && j <= v.To {
+					st, bar = st.Bold(true), bg.Foreground(c(cur.Accent)).Render("▎")
+				}
+				text := truncate(strings.ReplaceAll(l, "\t", "    "), max(width-8, 1))
+				lines = append(lines, chatLine{dim.Render("│ "), dim.Render(num) + bar + bg.Render(" ") + st.Render(text), bg})
+				if j == v.To {
+					for _, q := range msg.quote {
+						lines = append(lines, chatLine{dim.Render("│ "), dim.Render("     ┆ ") + dim.Italic(true).Render(truncate(q, max(width-10, 1))), bg})
+					}
+					comment()
+				}
 			}
 		case msgError:
 			add(errStyle.Render("✗ "), msg.text, errStyle, bg)

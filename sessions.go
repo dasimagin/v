@@ -136,7 +136,7 @@ func listSessions(dir string) []session {
 }
 
 // sessionLog rebuilds the chat log of a session from its file.
-func sessionLog(path string) []message {
+func sessionLog(path string, dirs ...string) []message {
 	var log []message
 	_ = readSession(path, func(r sessionRecord) {
 		if r.Type == "user" {
@@ -152,7 +152,7 @@ func sessionLog(path string) []message {
 					log = append(log, message{kind: msgAgent, text: b.Text})
 				}
 			case "tool_use":
-				log = append(log, message{kind: msgTool, text: toolSummary(b.Name, b.Input)})
+				log = append(log, message{kind: msgTool, text: toolSummary(b.Name, b.Input, dirs...)})
 			case "thinking":
 				log = append(log, message{kind: msgThinking, text: b.Thinking})
 			}
@@ -162,11 +162,7 @@ func sessionLog(path string) []message {
 }
 
 func (m *model) cmdResume(string) tea.Cmd {
-	if m.settings.Agent == agentCodex {
-		m.setErr("/resume lists Claude Code sessions; Codex threads are not there yet")
-		return nil
-	}
-	dir, _ := os.Getwd()
+	dir := m.workdir
 	list := listSessions(dir)
 	if len(list) == 0 {
 		m.setErr("no past sessions in " + tildify(dir))
@@ -181,7 +177,7 @@ func (m *model) cmdResume(string) tea.Cmd {
 // prompt continues it in Claude Code with --resume.
 func (m *model) resume(s session) {
 	m.stopAgent()
-	m.log = sessionLog(s.path)
+	m.log = sessionLog(s.path, m.workdir)
 	m.note(fmt.Sprintf("resumed the session from %s", ago(s.Modified)))
 	m.sessionID, m.resumeNext = s.ID, true
 	m.stack = nil
@@ -258,6 +254,9 @@ func (m *model) renderSessions(rows int) []string {
 }
 
 func truncate(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
 	if lipgloss.Width(s) <= w {
 		return s
 	}

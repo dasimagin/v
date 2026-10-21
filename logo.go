@@ -36,12 +36,59 @@ var taglines = []string{
 	"Works in my venv...",
 	"One typo, 400 lines of template errors...",
 	"Undefined behavior, defined vibes...",
+	"There are two hard things: naming, cache invalidation, and off-by-one errors...",
+	"Weeks of coding save hours of planning...",
+	"Hello, World. Now what...",
+	"Move fast and fix it later...",
+	"The cloud is just someone else's computer...",
+	"Legacy code: it works, nobody knows why...",
+	"Fixed one bug, found three...",
+	"Tests are documentation that can fail...",
+	"It worked yesterday...",
+	"Ctrl+C, Ctrl+V, ship...",
+	"No code is the best code...",
+	"Rubber duck debugging in progress...",
+	"Tabs or spaces? Yes...",
+	"Premature optimization is the root of all evil...",
+	"A watched build never finishes...",
+	"Why is it slow? It is always the database...",
+	"Ask forgiveness, not permission, in prod...",
+	"Compiling. Time for a coffee...",
+	"The tests passed. Suspicious...",
+	"Just one more refactor...",
+	"Merge conflicts build character...",
+	"Estimated: two days. Actual: two weeks...",
+	"Have you read the logs?",
+	"It's always DNS...",
+	"Debugging: being the detective in a crime movie where you are also the murderer...",
+	"Coffee.exe has stopped responding...",
+	"Make it work, make it right, make it fast...",
+	"Trust, but verify the diff...",
+	"Magic is just code you have not read yet...",
+	"Reviewing with love, shipping with hope...",
+	"Green build, sleepy reviewer...",
+	"One does not simply merge on Friday...",
+	"The best code is the code you deleted...",
+	"Cache me if you can...",
+	"Semicolons are a state of mind...",
+	"It depends...",
+	"Another day, another dependency...",
+	"The PR was small, they said...",
 	// Code stays as typed.
 	"git push --force and pray",
 	"// TODO: write tests",
 	"import antigravity",
 	"if err != nil { return err }",
 	"Segmentation fault (core dumped)",
+	"sudo make me a sandwich",
+	"while (!asleep) { code(); }",
+	"rm -rf node_modules && pray",
+	"git commit -m \"fix\"",
+	"404: motivation not found",
+	"panic: not enough coffee",
+	"git blame yourself",
+	"0 errors, 0 warnings, 1 surprise",
+	"[ OK ] Reached target Vibes",
 }
 
 // gradient blends a into b; colors are "#rrggbb", t is in [0, 1].
@@ -77,21 +124,6 @@ func renderLogo() []string {
 			}
 		}
 		out[i] = b.String()
-	}
-	return out
-}
-
-// splash returns the logo and the tagline, centered in width×rows.
-func splash(tagline string, width, rows int) []string {
-	block := append(renderLogo(), "", hintStyle.Italic(true).Render(tagline))
-	top := max((rows-len(block))/2, 0)
-	out := make([]string, rows)
-	for i := range out {
-		line := ""
-		if i >= top && i < top+len(block) {
-			line = block[i-top]
-		}
-		out[i] = center(line, width)
 	}
 	return out
 }

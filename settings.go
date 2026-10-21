@@ -14,13 +14,20 @@ type Settings struct {
 	Model  string `json:"model"`  // Claude Code --model
 	Effort string `json:"effort"` // Claude Code --effort
 
-	Agent       string `json:"agent"`        // "claude" or "codex"
-	CodexModel  string `json:"codex_model"`  // "" for Codex's default
-	CodexEffort string `json:"codex_effort"` // "" for the model's default
+	ApplyMode  string `json:"apply_mode"`          // "manual": ask about every step; "auto": the agent applies, commits, pushes and replies on its own
+	Iterations int    `json:"converge_iterations"` // the most rounds of review and fix that /converge runs
+	Background string `json:"background"`          // "theme" (default), "terminal" (leave it to the terminal) or "sync" (the theme's, also set on the terminal)
+	Animate    bool   `json:"animate"`             // the brand shimmers
+	PRComments string `json:"pr_comments"`         // "pending" (default): comments written on the PR screen wait in your pending review until you submit it; "immediate": they are published at once
+	ReviewMode string `json:"review_mode"`         // "manual": accept each comment; "auto": post at once as a pending review
+
+	DiffBefore int `json:"diff_before"` // lines of context before each change, in every diff
+	DiffAfter  int `json:"diff_after"`  // and after it
+
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
 }
 
 // models are the choices for the agent's model, best first.

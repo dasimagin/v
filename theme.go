@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -105,8 +106,12 @@ func loadThemes(userDir string) error {
 			if err == nil {
 				var t *Theme
 				if t, err = parseVSCodeTheme(strings.TrimSuffix(filepath.Base(f), ".json"), data); err == nil {
-					byID[t.ID] = t
-					continue
+					if isLight(t.Bg) {
+						err = errors.New("light themes are not supported")
+					} else {
+						byID[t.ID] = t
+						continue
+					}
 				}
 			}
 			errs = append(errs, fmt.Errorf("theme %s: %w", filepath.Base(f), err))
@@ -120,10 +125,17 @@ func loadThemes(userDir string) error {
 	return errors.Join(errs...)
 }
 
+// transparentBG leaves the screen's background to the terminal instead of
+// painting the theme's, so no rectangle shows when the two differ.
+var transparentBG bool
+
 func applyTheme(t *Theme) {
 	cur = t
 	c := func(s string) lipgloss.Color { return lipgloss.Color(s) }
-	bg = lipgloss.NewStyle().Background(c(t.Bg))
+	bg = lipgloss.NewStyle()
+	if !transparentBG {
+		bg = bg.Background(c(t.Bg))
+	}
 	fgStyle = bg.Foreground(c(t.Fg))
 	sepStyle = bg.Foreground(c(t.Gutter))
 	hintStyle = bg.Foreground(c(t.Muted))
@@ -132,6 +144,7 @@ func applyTheme(t *Theme) {
 	selStyle = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Fg)).Bold(true)
 	buttonStyle = lipgloss.NewStyle().Background(c(t.Accent)).Foreground(c(t.Bg)).Bold(true)
 	buttonOpen = buttonStyle.Background(c(t.Accent2))
+	commentButton = bg.Background(c(t.Sel)).Foreground(c(t.Fg)).Bold(true)
 	buttonOff = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Muted))
 	gutterStyle = bg.Foreground(c(t.Gutter))
 	addTint = gradient(t.Added, t.Bg, 0.82)
@@ -193,4 +206,14 @@ func styleFor(t chroma.TokenType) lipgloss.Style {
 	}
 	styleCache[t] = s
 	return s
+}
+
+// isLight reports whether a "#rrggbb" background is light, by its perceived brightness.
+func isLight(hex string) bool {
+	v, err := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	if err != nil {
+		return false
+	}
+	r, g, b := float64(v>>16&0xff), float64(v>>8&0xff), float64(v&0xff)
+	return 0.299*r+0.587*g+0.114*b > 140
 }

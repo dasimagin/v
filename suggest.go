@@ -30,6 +30,9 @@ const menuRows = 6
 // suggest rebuilds the menu for the current omnibox value. force opens an
 // argument menu; otherwise only a command menu or an already open one updates.
 func (m *model) suggest(force bool) {
+	if m.syncPicker() {
+		return
+	}
 	v := m.omni.Value()
 	if !force && v == m.dismissed {
 		m.menu = nil
@@ -64,7 +67,7 @@ func (m *model) suggest(force bool) {
 	if c == nil || c.Complete == nil || (!force && (prev == nil || !prev.args)) {
 		return
 	}
-	keep, cands := c.Complete(arg)
+	keep, cands := c.Complete(m.workdir, arg)
 	mu := &menu{head: "/" + name + " " + keep, args: true}
 	for _, s := range cands {
 		mu.items = append(mu.items, item{value: s, label: s})
@@ -123,6 +126,9 @@ func (m *model) accept() tea.Cmd {
 	it := mu.items[mu.sel]
 	m.menu = nil
 	if c := it.cmd; c != nil {
+		if c.Name == "switch" || c.Name == "workdir" {
+			return m.openPicker(c.Name, "")
+		}
 		if c.Args == "" || findCommand(strings.TrimPrefix(m.omni.Value(), "/")) == c {
 			m.omni.SetValue("")
 			return m.run("/" + c.Name)

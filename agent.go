@@ -12,11 +12,11 @@ import (
 )
 
 // toolSummary is a one-line description of a tool call, e.g. "Edit main.go".
-func toolSummary(name string, in map[string]any) string {
+func toolSummary(name string, in map[string]any, dirs ...string) string {
 	for _, k := range []string{"file_path", "command", "pattern", "path", "url", "description"} {
 		if v, ok := in[k].(string); ok && v != "" {
 			if k == "file_path" || k == "path" {
-				v = shortPath(v)
+				v = shortPath(v, dirs...)
 			}
 			v = strings.SplitN(v, "\n", 2)[0]
 			return name + " " + v
@@ -33,14 +33,14 @@ func fromUser(line string) bool {
 }
 
 // shortPath shows a path relative to the working directory when it is inside it.
-func shortPath(p string) string {
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
+func shortPath(p string, dirs ...string) string {
+	wd, _ := os.Getwd()
+	if len(dirs) > 0 {
+		wd = dirs[0]
 	}
-	if wd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return rel
-		}
+	p = workPath(wd, p)
+	if rel, err := filepath.Rel(wd, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel
 	}
 	return tildify(p)
 }
@@ -77,8 +77,11 @@ func (m *model) onEvent(e ev) {
 	case evToolError:
 		m.noteErr(e.text)
 	case evAsk:
-		m.ask(e.perm)
+		if !m.runPermission(e.perm) {
+			m.ask(e.perm)
+		}
 	case evDone:
+		m.finishRunTurn()
 		m.busy = false
 		switch {
 		case m.interrupted:
@@ -179,10 +182,14 @@ func (m *model) prompt(text string) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
+	if m.workspaceNotice != "" {
+		text = "[Workspace context: " + m.workspaceNotice + "]\n\n" + text
+	}
 	if err := m.agent.Prompt(text); err != nil {
 		m.note(err.Error())
 		return cmd
 	}
+	m.workspaceNotice = ""
 	m.busy = true
 	return cmd
 }
@@ -192,7 +199,7 @@ func (m *model) prompt(text string) tea.Cmd {
 func (m *model) connect() tea.Cmd {
 	resume := ""
 	if m.agent != nil && m.agentStale && !m.busy {
-		// New model or effort: restart on the same session.
+		// New model, effort or workdir: reconnect on the same session.
 		resume = m.sessionID
 		m.stopAgent()
 	}
@@ -200,24 +207,25 @@ func (m *model) connect() tea.Cmd {
 		return nil
 	}
 	if m.resumeNext {
-		resume, m.resumeNext = m.sessionID, false
+		resume = m.sessionID
 	}
-	dir, _ := os.Getwd()
-	a, err := startBackend(dir, m.settings, resume)
+	// A run's agent is always Claude Code, with the run's tools and rules.
+	var a backend
+	var err error
+	var tools []mcpTool
+	if r := m.runScr; r != nil {
+		tools = r.tools
+		a, err = startClaude(m.workdir, m.settings, resume, tools, r.system)
+	} else {
+		a, err = startClaude(m.workdir, m.settings, resume, nil, "")
+	}
 	if err != nil {
+		m.resumeNext = resume != ""
 		m.noteErr(err.Error())
 		return nil
 	}
-	m.agent = a
+	m.agent, m.resumeNext, m.agentHasTools = a, false, len(tools) > 0
 	return a.wait()
-}
-
-// startBackend starts the agent named in the settings.
-func startBackend(dir string, s Settings, resume string) (backend, error) {
-	if s.Agent == agentCodex {
-		return startCodex(dir, s, resume)
-	}
-	return startClaude(dir, s, resume)
 }
 
 // sendQueued sends the next queued prompt once the agent is idle.
@@ -234,42 +242,24 @@ func (m *model) sendQueued() {
 	m.busy = true
 }
 
-// agentSettingsChanged applies a new model or effort from the next message.
-// Claude Code restarts on the same session for it; Codex takes them per turn.
+// agentSettingsChanged applies a new model or effort from the next message:
+// Claude Code restarts on the same session for it.
 func (m *model) agentSettingsChanged() {
-	if m.agent != nil && m.settings.Agent != agentCodex {
+	if m.agent != nil {
 		m.agentStale = true
 	}
 	m.flash(m.agentLabel() + " from the next message")
 }
 
-// agentChanged switches between Claude Code and Codex: the session ends and
-// the next prompt starts the other agent.
-func (m *model) agentChanged() {
-	m.stopAgent()
-	m.sessionID, m.resumeNext = "", false
-	m.flash(m.agentLabel() + " from the next message, in a new session")
+// agentLabel names the model and effort: "Opus 5.5 · high".
+func (m *model) agentLabel() string {
+	model, effort := m.agentParts()
+	return model + " · " + effort
 }
 
-// agentLabel names the agent, model and effort: "Opus 5.5 · high",
-// "Codex · GPT-6.1-Sol · high".
-func (m *model) agentLabel() string {
-	s := m.settings
-	if s.Agent != agentCodex {
-		return modelName(s.Model) + " · " + s.Effort
-	}
-	model, effort := s.CodexModel, s.CodexEffort
-	if model == "" {
-		model = codexDefault().ID
-	}
-	label := "Codex"
-	if model != "" {
-		label += " · " + codexModelName(model)
-	}
-	if effort != "" {
-		label += " · " + effort
-	}
-	return label
+// agentParts are the model and effort labels, each a dropdown in the status line.
+func (m *model) agentParts() (model, effort string) {
+	return modelName(m.settings.Model), m.settings.Effort
 }
 
 // stopAgent ends the agent session, if any.
@@ -277,7 +267,7 @@ func (m *model) stopAgent() {
 	if m.agent != nil {
 		m.agent.Close()
 	}
-	m.agent, m.busy, m.perm, m.agentReady, m.agentStale = nil, false, nil, false, false
+	m.agent, m.busy, m.perm, m.agentReady, m.agentStale, m.agentHasTools = nil, false, nil, false, false, false
 	m.queue = nil
 }
 
@@ -287,6 +277,9 @@ type choice struct{ key, label string }
 // choices are the answers for the pending tool call: edits under review can
 // also be edited before accepting.
 func (m *model) choices() []choice {
+	if m.perm == nil && m.reviewAsking() {
+		return []choice{{"y", "Yes, post it"}, {"n", "No, skip it"}, {"a", "Yes, and accept the rest"}, {"x", "Stop the review"}}
+	}
 	if m.mode == modeReview && m.perm.propose != nil {
 		return []choice{{"y", "Yes"}, {"e", "Edit first"}, {"n", "No"}}
 	}
@@ -295,10 +288,17 @@ func (m *model) choices() []choice {
 
 // showChoices reports whether the choice list replaces the status line.
 func (m *model) showChoices() bool {
-	return m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)
+	return (m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)) || (m.perm == nil && m.reviewAsking())
 }
 
+// reviewAsking reports whether a review comment is waiting for an answer here.
+func (m *model) reviewAsking() bool { return m.rv.waiting() && m.mode == modeChat }
+
 func (m *model) choose(key, note string) {
+	if m.perm == nil {
+		m.reviewChoose(key, note)
+		return
+	}
 	switch key {
 	case "y":
 		m.answerPermission(true, note)
@@ -313,7 +313,13 @@ func (m *model) choose(key, note string) {
 // renderChoices draws the question and the answers under the omnibox.
 func (m *model) renderChoices() []string {
 	ask := bg.Foreground(lipgloss.Color(cur.Type)).Bold(true)
-	out := []string{bg.Render(" ") + ask.Render("? Allow "+m.perm.summary+"?")}
+	question := "? Post this comment to the PR?"
+	if m.perm != nil {
+		question = "? Allow " + m.perm.summary + "?"
+	} else if q := m.rv.ask.card.Question; q != "" {
+		question = "? " + q
+	}
+	out := []string{bg.Render(" ") + ask.Render(question)}
 	labelW := 0
 	for _, c := range m.choices() {
 		labelW = max(labelW, len(c.label))

@@ -6,16 +6,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// systemPrompt tells the agent where it runs. Claude Code appends it to its
-// own system prompt; Codex gets it as developer instructions.
-const systemPrompt = `You are running inside v, a terminal UI for coding together with the user.
-The user sees every edit you propose as a diff and approves or rejects it. Keep replies short.
-The user may change your proposed edit before accepting it; the file then holds their version.
-Read a file again before editing it a second time.`
-
-// backend is a coding agent v drives: Claude Code or Codex. Each runs as a
-// subprocess signed in with the user's own subscription, and reports what
-// happens as ev values.
+// backend is a coding agent v drives: Claude Code, a subprocess signed in
+// with the user's own subscription, which reports what happens as ev values.
 type backend interface {
 	Name() string
 	Prompt(text string) error
@@ -76,6 +68,7 @@ const denyMessage = "The user denied this in v."
 type permission struct {
 	id      any    // the backend's request id
 	summary string // "Edit main.go", "Bash go test ./..."
+	tool    string // the tool's name: "Edit", "Bash", "mcp__v__pr_reply"
 	// propose builds the file as the tool call would leave it; nil for tool
 	// calls that are not file edits.
 	propose func() (*Doc, error)

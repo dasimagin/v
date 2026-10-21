@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -106,14 +107,56 @@ func prTools(rv *reviewFlow) []mcpTool {
 		},
 		{
 			Name:        toolPrefix + "checks",
-			Description: "The PR's CI checks. status is all (default) or failing.",
-			Schema:      `{"type":"object","properties":{"status":{"type":"string","enum":["all","failing"]}}}`,
+			Description: "The PR's CI checks on GitHub, with a count of passed, failed and pending ones. status is all (default), failing or pending.",
+			Schema:      `{"type":"object","properties":{"status":{"type":"string","enum":["all","failing","pending"]}}}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var a struct{ Status string }
 				if err := decode(raw, &a); err != nil {
 					return "", err
 				}
-				return rv.checks(a.Status == "failing")
+				return rv.checks(a.Status)
+			},
+		},
+		{
+			Name: toolPrefix + "check_log",
+			Description: "The end of the log of a failing CI check (the first failing one when name is empty; a part of a check's name is enough). " +
+				"tail is how many lines to give back (default 150, at most 1000). Only GitHub Actions jobs have logs that can be read.",
+			Schema: `{"type":"object","properties":{"name":{"type":"string"},"tail":{"type":"integer"}}}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var a struct {
+					Name string
+					Tail int
+				}
+				if err := decode(raw, &a); err != nil {
+					return "", err
+				}
+				return rv.checkLog(a.Name, a.Tail)
+			},
+		},
+		{
+			Name: toolPrefix + "checks_wait",
+			Description: "Wait until the PR's CI checks have finished (none pending), then say how they ended. CI is slow, so this can take many minutes: " +
+				"use it after a push when you want to know the outcome, not as a habit. timeout_seconds defaults to 1200 and is at most 3600.",
+			Schema: `{"type":"object","properties":{"timeout_seconds":{"type":"integer"}}}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var a struct {
+					TimeoutSeconds int `json:"timeout_seconds"`
+				}
+				if err := decode(raw, &a); err != nil {
+					return "", err
+				}
+				timeout := time.Duration(min(max(a.TimeoutSeconds, 0), 3600)) * time.Second
+				if timeout == 0 {
+					timeout = 20 * time.Minute
+				}
+				checks, done, err := waitForChecks(ctx, func() ([]ciCheck, error) { return fetchChecks(rv.dir, rv.url) }, 20*time.Second, timeout)
+				if err != nil {
+					return "", err
+				}
+				if !done {
+					return "still pending after " + timeout.String() + "\n" + describeChecks(checks, "pending"), nil
+				}
+				return "finished\n" + describeChecks(checks, "all"), nil
 			},
 		},
 		{
@@ -249,34 +292,143 @@ func (rv *reviewFlow) threads(status string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// checks lists the PR's CI checks, optionally only the failing ones.
-func (rv *reviewFlow) checks(failingOnly bool) (string, error) {
-	out, err := ghLoose(rv.dir, "pr", "checks", rv.url, "--json", "name,bucket,workflow,link,description")
+// ciCheck is one CI check of the PR, as GitHub reports it.
+type ciCheck struct {
+	Name, Bucket, Workflow, Link, Description string
+}
+
+// bucket values of `gh pr checks`: pass, fail, pending, skipping, cancel.
+func (c ciCheck) label() string {
+	if c.Workflow != "" {
+		return c.Workflow + " / " + c.Name
+	}
+	return c.Name
+}
+
+func fetchChecks(dir, url string) ([]ciCheck, error) {
+	out, err := ghLoose(dir, "pr", "checks", url, "--json", "name,bucket,workflow,link,description")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var checks []struct {
-		Name, Bucket, Workflow, Link, Description string
-	}
+	var checks []ciCheck
 	if err := json.Unmarshal(out, &checks); err != nil {
-		return "", err
+		return nil, err
 	}
+	return checks, nil
+}
+
+// describeChecks lists the checks that match status: all, failing or pending.
+func describeChecks(checks []ciCheck, status string) string {
 	var lines []string
+	counts := map[string]int{}
 	for _, c := range checks {
-		if failingOnly && c.Bucket != "fail" {
+		counts[c.Bucket]++
+		switch {
+		case status == "failing" && c.Bucket != "fail":
+			continue
+		case status == "pending" && c.Bucket != "pending":
 			continue
 		}
-		line := fmt.Sprintf("[%s] %s", c.Bucket, c.Name)
-		if c.Workflow != "" {
-			line = fmt.Sprintf("[%s] %s / %s", c.Bucket, c.Workflow, c.Name)
-		}
+		line := fmt.Sprintf("[%s] %s", c.Bucket, c.label())
 		if c.Link != "" {
 			line += " " + c.Link
 		}
 		lines = append(lines, line)
 	}
-	if len(lines) == 0 {
-		return "no checks", nil
+	if len(checks) == 0 {
+		return "no checks"
 	}
-	return strings.Join(lines, "\n"), nil
+	head := fmt.Sprintf("%d checks: %d passed, %d failed, %d pending", len(checks), counts["pass"], counts["fail"], counts["pending"])
+	if len(lines) == 0 {
+		return head + "\nnone with status " + status
+	}
+	return head + "\n" + strings.Join(lines, "\n")
+}
+
+// checks lists the PR's CI checks, optionally only the failing or pending ones.
+func (rv *reviewFlow) checks(status string) (string, error) {
+	checks, err := fetchChecks(rv.dir, rv.url)
+	if err != nil {
+		return "", err
+	}
+	return describeChecks(checks, status), nil
+}
+
+var jobLink = regexp.MustCompile(`/actions/runs/\d+/job/(\d+)`)
+
+// checkJobID is the GitHub Actions job behind a check's link.
+func checkJobID(link string) (string, bool) {
+	m := jobLink.FindStringSubmatch(link)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// tailLines keeps the last n lines of text.
+func tailLines(text string, n int) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return fmt.Sprintf("… %d lines left out …\n", len(lines)-n) + strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// checkLog is the end of the log of a failing check; name picks the check
+// (a part of its name is enough). Checks that are not GitHub Actions jobs only have a link.
+func (rv *reviewFlow) checkLog(name string, tail int) (string, error) {
+	checks, err := fetchChecks(rv.dir, rv.url)
+	if err != nil {
+		return "", err
+	}
+	var picked *ciCheck
+	for i, c := range checks {
+		if name == "" && c.Bucket == "fail" || name != "" && strings.Contains(strings.ToLower(c.label()), strings.ToLower(name)) {
+			picked = &checks[i]
+			break
+		}
+	}
+	if picked == nil {
+		return "", fmt.Errorf("no check matches %q; pr_checks lists them", name)
+	}
+	job, ok := checkJobID(picked.Link)
+	if !ok {
+		return fmt.Sprintf("%s has no log that v can read; see %s", picked.label(), picked.Link), nil
+	}
+	out, err := ghOutput(rv.dir, "api", fmt.Sprintf("repos/%s/actions/jobs/%s/logs", rv.repo, job))
+	if err != nil {
+		return "", fmt.Errorf("the log of %s is not available yet or cannot be read: %w", picked.label(), err)
+	}
+	if tail <= 0 {
+		tail = 150
+	}
+	return fmt.Sprintf("log of %s (%s):\n%s", picked.label(), picked.Bucket, tailLines(string(out), min(tail, 1000))), nil
+}
+
+// waitForChecks polls until no check is pending, the context ends or the timeout passes.
+func waitForChecks(ctx context.Context, fetch func() ([]ciCheck, error), every, timeout time.Duration) ([]ciCheck, bool, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		checks, err := fetch()
+		if err != nil {
+			return nil, false, err
+		}
+		pending := 0
+		for _, c := range checks {
+			if c.Bucket == "pending" {
+				pending++
+			}
+		}
+		if pending == 0 {
+			return checks, true, nil
+		}
+		if time.Now().Add(every).After(deadline) {
+			return checks, false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return checks, false, ctx.Err()
+		case <-time.After(every):
+		}
+	}
 }

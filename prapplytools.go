@@ -28,7 +28,7 @@ func (h *applyHub) get() *reviewFlow {
 }
 
 // applyReadTools are the pr_* tools that only read.
-var applyReadTools = map[string]bool{"description": true, "threads": true, "checks": true}
+var applyReadTools = map[string]bool{"description": true, "threads": true, "checks": true, "check_log": true, "checks_wait": true}
 
 // applyTools are the hands of the chat agent while it applies review
 // feedback: the pr_* readers, and pr_reply and pr_resolve, which ask the user

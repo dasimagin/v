@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // A run is /review or /apply on its own screen: a separate conversation with
@@ -94,14 +96,21 @@ func (m *model) chatHeader() []string {
 		info = "working · esc stops it"
 	}
 	if lp := m.loop; lp != nil && !lp.finished {
-		who := map[string]string{"review": "reviewer", "fix": "fixer"}[lp.phase]
-		info = fmt.Sprintf("round %d/%d · the %s · esc stops", lp.iter, lp.max, who)
+		info = fmt.Sprintf("round %d/%d · esc stops", lp.iter, lp.max)
 	}
 	mode := "manual"
 	if r.auto {
 		mode = "auto"
 	}
-	return m.header(fgStyle.Bold(true).Render(strings.Title(r.kind)+" · "+r.title), mode+" · experimental · "+info, "")
+	title := fgStyle.Bold(true).Render(strings.Title(r.kind) + " · " + r.title)
+	if lp := m.loop; lp != nil && !lp.finished {
+		col, who := cur.Accent, "REVIEWER"
+		if lp.phase == "fix" {
+			col, who = cur.Accent2, "FIXER"
+		}
+		title += bg.Render("  ") + bg.Foreground(lipgloss.Color(col)).Bold(true).Render("● "+who)
+	}
+	return m.header(title, mode+" · experimental · "+info, "")
 }
 
 // runBlocked are the commands that would pull the rug from under a run.

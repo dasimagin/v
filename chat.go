@@ -36,10 +36,16 @@ const (
 	msgThinking                // the model's thinking, collapsed unless expanded
 	msgError                   // an error from the agent or a tool
 	msgFinding                 // a review comment with its diff, waiting for y or n
+	msgSection                 // a heading that starts a stage of the converge loop; answer is "review" or "fix"
 )
 
 // note adds a message from v to the chat log.
 func (m *model) note(text string) { m.log = append(m.log, message{kind: msgNote, text: text}) }
+
+// section adds a heading that starts the reviewer's or the fixer's stage.
+func (m *model) section(who, text string) {
+	m.log = append(m.log, message{kind: msgSection, text: text, answer: who})
+}
 
 // noteErr adds an error to the chat log.
 func (m *model) noteErr(text string) { m.log = append(m.log, message{kind: msgError, text: text}) }
@@ -175,6 +181,16 @@ func (m *model) renderLog(rows int) []string {
 					comment()
 				}
 			}
+		case msgSection:
+			gap()
+			col := cur.Accent
+			if msg.answer == "fix" {
+				col = cur.Accent2
+			}
+			st := bg.Foreground(c(col)).Bold(true)
+			head := " " + strings.ToUpper(msg.text) + " "
+			rule := strings.Repeat("━", max(width-lipgloss.Width(head)-4, 3))
+			lines = append(lines, chatLine{st.Render("━━"), st.Render(head + rule), bg})
 		case msgError:
 			add(errStyle.Render("✗ "), msg.text, errStyle, bg)
 		case msgThinking:

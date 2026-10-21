@@ -61,7 +61,7 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 			m.setErr("usage: /pr <URL, number, or auto>")
 			return nil
 		}
-		return m.linkPR(arg)
+		return m.checkoutPR(arg)
 	}
 	prs := m.repo.pullRequests()
 	if len(prs) == 1 || (len(prs) > 1 && m.repo.Link != "") {

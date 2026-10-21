@@ -134,7 +134,7 @@ func (m *model) startReviewPhase(d *prData) tea.Cmd {
 	if warn != "" {
 		m.noteErr(warn)
 	}
-	m.note(fmt.Sprintf("── round %d/%d · the reviewer ──", lp.iter, lp.max))
+	m.section("review", fmt.Sprintf("Round %d/%d · reviewer", lp.iter, lp.max))
 	cmd := m.prompt(fmt.Sprintf("Review pull request #%d: %s", d.Number, d.Title))
 	m.armRun(rv)
 	return tea.Batch(cmd, rv.wait())
@@ -158,7 +158,7 @@ func (m *model) startFixPhase(d *prData, refs []applyRef) tea.Cmd {
 	if warn != "" {
 		m.noteErr(warn)
 	}
-	m.note(fmt.Sprintf("── round %d/%d · the fixer, %d threads ──", lp.iter, lp.max, len(refs)))
+	m.section("fix", fmt.Sprintf("Round %d/%d · fixer · %d threads", lp.iter, lp.max, len(refs)))
 	cmd := m.prompt(task)
 	m.armRun(rv)
 	return tea.Batch(cmd, rv.wait())

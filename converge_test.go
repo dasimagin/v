@@ -65,7 +65,7 @@ func TestLoopSummaryAndLifecycle(t *testing.T) {
 		{iter: 1, critical: 1, recommended: 1, notes: 2, handed: 4, closed: 3, ranFixer: true},
 		{iter: 2},
 	}
-	if h := ansi.Strip(strings.Join(m.chatHeader(), "\n")); !strings.Contains(h, "Converge · PR #7") || !strings.Contains(h, "round 2/5 · the reviewer") {
+	if h := ansi.Strip(strings.Join(m.chatHeader(), "\n")); !strings.Contains(h, "Converge · PR #7") || !strings.Contains(h, "REVIEWER") || !strings.Contains(h, "round 2/5") {
 		t.Errorf("header = %q", h)
 	}
 	m.loopFinish("the reviewer had nothing to add")

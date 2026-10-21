@@ -211,6 +211,7 @@ func (m *model) onRepository(msg tea.Msg) tea.Cmd {
 		m.repoChanging = false
 		if msg.err != nil {
 			m.setErr(msg.err.Error())
+			m.noteErr(msg.err.Error())
 		} else {
 			m.clearWorkspaceViews()
 			m.workspaceNotice = "The user switched the Git branch in " + m.workdir + ". Read the current branch and files before continuing."
@@ -266,5 +267,29 @@ func (m *model) linkPR(link string) tea.Cmd {
 		}
 		_, err := gitOutput(dir, args...)
 		return prLinkedMsg{seq, err}
+	}
+}
+
+// checkoutPR switches the workdir to the PR's own branch (gh handles forks and
+// remotes) and links the PR to it. Failures, such as a dirty tree or another
+// repository, come back through branchSwitchedMsg and land in the chat.
+func (m *model) checkoutPR(link string) tea.Cmd {
+	if m.repo == nil || !m.canSwitchWorkspace() {
+		return nil
+	}
+	m.repoSeq++
+	m.repoChanging, m.repoLoading, m.prLoading = true, false, false
+	m.repoMenu = nil
+	m.flash("checking out the PR branch…")
+	dir, seq := m.workdir, m.repoSeq
+	return func() tea.Msg {
+		if _, err := ghOutput(dir, "pr", "checkout", link); err != nil {
+			return branchSwitchedMsg{seq, fmt.Errorf("cannot check out %s: %w", link, err)}
+		}
+		branch, err := gitOutput(dir, "branch", "--show-current")
+		if err == nil && strings.TrimSpace(branch) != "" {
+			_, err = gitOutput(dir, "config", "--local", "--replace-all", "branch."+strings.TrimSpace(branch)+".v-pr", link)
+		}
+		return branchSwitchedMsg{seq, err}
 	}
 }

@@ -46,7 +46,7 @@ var taglines = []string{
 	"The code that is not there has no bugs...",
 	"It worked yesterday...",
 	"Ctrl+C, Ctrl+V, ship...",
-	"No code is faster than no code...",
+	"No code is the best code...",
 	"Rubber duck debugging in progress...",
 	"Tabs or spaces? Yes...",
 	"Premature optimization is the root of all evil...",

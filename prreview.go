@@ -170,6 +170,8 @@ type reviewCard struct {
 	label    string   // what the chat shows above it
 	Question string   // what the choice menu asks; empty for the default
 	posted   bool     // sent to GitHub, or dropped
+	Level    string   // critical, recommended or note for a comment or a reopening; empty for a plain reply
+	Reopen   bool     // reopen the thread after the reply
 }
 
 // reviewFlow is one /review in progress.
@@ -182,6 +184,7 @@ type reviewFlow struct {
 	running        bool
 	dropped        bool
 	apply          bool // /apply: the main agent works, and these tools are its hands
+	publish        bool // post accepted comments as a published review even in auto mode (the review/fix loop)
 	out            chan tea.Msg
 	ask            *reviewAsk // the proposal waiting for the user; UI side only
 	acceptAll      atomic.Bool
@@ -485,9 +488,10 @@ func (m *model) finishReviewTurn(rv *reviewFlow) tea.Cmd {
 		c.posted = true
 	}
 	m.flash(fmt.Sprintf("posting %d comments to PR #%d…", len(accepted), rv.number))
+	pending := rv.auto && !rv.publish
 	return func() tea.Msg {
-		n, err := postReview(rv.dir, rv.repo, rv.number, accepted, rv.auto)
-		return reviewPostedMsg{rv, n, rv.auto, err}
+		n, err := postReview(rv.dir, rv.repo, rv.number, accepted, pending)
+		return reviewPostedMsg{rv, n, pending, err}
 	}
 }
 
@@ -552,6 +556,11 @@ func postReview(dir, repo string, number int, cards []*reviewCard, pending bool)
 			return n, fmt.Errorf("a reply failed, the pending review is still there: %w", err)
 		}
 		n++
+		if c.Reopen {
+			if _, err := ghGraphQL(dir, `mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{id}}}`, map[string]any{"id": c.Thread}); err != nil {
+				return n, fmt.Errorf("the reply is posted but the thread could not be reopened: %w", err)
+			}
+		}
 	}
 	if !pending {
 		if _, err := ghInput(dir, []byte(`{"event":"COMMENT"}`), "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/events", repo, number, rev.ID)); err != nil {
@@ -715,4 +724,24 @@ func addToPendingReview(dir, review string, cards []*reviewCard) error {
 		}
 	}
 	return nil
+}
+
+// levelCounts splits what the reviewer proposed (and the user accepted) into
+// blocking comments, marked critical or recommended (the ones with "!" or
+// "!!", reopenings included), and plain notes. Replies are neither.
+func (rv *reviewFlow) levelCounts() (blocking, notes int) {
+	rv.mu.Lock()
+	defer rv.mu.Unlock()
+	for _, c := range rv.cards {
+		if c.Decision != "y" {
+			continue
+		}
+		switch c.Level {
+		case "critical", "recommended":
+			blocking++
+		case "note":
+			notes++
+		}
+	}
+	return
 }

@@ -236,7 +236,32 @@ var options = []option{
 			return nil
 		},
 	},
+	{
+		label: "Converge iterations (experimental)",
+		desc:  "The most rounds of review and fix that /converge runs before it stops",
+		values: func(*model) []string {
+			names := make([]string, len(iterationChoices))
+			for i, n := range iterationChoices {
+				names[i] = fmt.Sprint(n)
+			}
+			return names
+		},
+		get: func(m *model) int {
+			for i, n := range iterationChoices {
+				if n == m.settings.Iterations {
+					return i
+				}
+			}
+			return 4 // 5, the default
+		},
+		set: func(m *model, i int) error {
+			m.settings.Iterations = iterationChoices[i]
+			return nil
+		},
+	},
 }
+
+var iterationChoices = []int{1, 2, 3, 4, 5, 6, 8, 10}
 
 // contextIndex is the dropdown entry closest to n lines of context.
 func contextIndex(n int) int {

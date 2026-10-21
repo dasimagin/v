@@ -290,3 +290,76 @@ func TestCardsShowNumberedDiffWithTheCoveredLines(t *testing.T) {
 		t.Error("a line outside the diff has no view")
 	}
 }
+
+func TestReopenNeedsAResolvedThreadAndARealObjection(t *testing.T) {
+	d := &prData{Number: 7, Files: []prFile{{Path: "f.go", Patch: strings.Split(strings.TrimRight(rangeDiff, "\n"), "\n"), Threads: []prThread{
+		{ID: "T_closed", Line: 2, Resolved: true, Comments: []prComment{{Author: "me", Body: "fix this"}, {Author: "fixer", Body: "done"}}},
+		{ID: "T_open", Line: 3, Comments: []prComment{{Author: "me", Body: "and this"}}},
+	}}}}
+	rv := &reviewFlow{data: d, auto: true, out: make(chan tea.Msg, 8)}
+	call := func(args string) (string, error) { return callTool(t, rv, "pr_reopen", args) }
+
+	for args, want := range map[string]string{
+		`{"thread":"T_closed","level":"note","body":"x"}`:      "critical or recommended",
+		`{"thread":"T_closed","level":"critical","body":"  "}`: "say why",
+		`{"thread":"nope","level":"critical","body":"x"}`:      "no thread",
+		`{"thread":"T_open","level":"recommended","body":"x"}`: "already open",
+	} {
+		if _, err := call(args); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", args, err, want)
+		}
+	}
+	out, err := call(`{"thread":"T_closed","level":"critical","body":"the fix only moves the bug"}`)
+	if err != nil || !strings.HasPrefix(out, "accepted") {
+		t.Fatalf("reopen: %q %v", out, err)
+	}
+	c := rv.cards[0]
+	if !c.Reopen || c.Thread != "T_closed" || c.Level != "critical" || c.Body != "**!!** the fix only moves the bug" || !strings.HasPrefix(c.label, "reopen") {
+		t.Errorf("card = %+v", c)
+	}
+	if c.View.empty() || len(c.Quote) != 2 {
+		t.Errorf("the card must show the thread: view=%v quote=%v", c.View, c.Quote)
+	}
+}
+
+func TestLevelCountsTellBlockingFromNotes(t *testing.T) {
+	rv := &reviewFlow{cards: []*reviewCard{
+		{Level: "critical", Decision: "y"},
+		{Level: "recommended", Decision: "y"},
+		{Level: "recommended", Decision: "n"}, // turned down: not counted
+		{Level: "note", Decision: "y"},
+		{Level: "", Thread: "T", Decision: "y"}, // a plain reply
+		{Level: "critical", Reopen: true, Thread: "T2", Decision: "y"},
+	}}
+	if blocking, notes := rv.levelCounts(); blocking != 3 || notes != 1 {
+		t.Errorf("blocking=%d notes=%d", blocking, notes)
+	}
+	if blocking, notes := (&reviewFlow{}).levelCounts(); blocking != 0 || notes != 0 {
+		t.Error("nothing proposed, nothing counted")
+	}
+}
+
+func TestIterationsDefaultToFiveAndAreAnOption(t *testing.T) {
+	s := defaultSettings()
+	if s.Iterations != 5 {
+		t.Errorf("default iterations = %d", s.Iterations)
+	}
+	m := newModel()
+	m.settings = s
+	var opt option
+	for _, o := range options {
+		if strings.HasPrefix(o.label, "Converge iterations") {
+			opt = o
+		}
+	}
+	if opt.label == "" {
+		t.Fatal("no Converge iterations option")
+	}
+	if names := opt.values(&m); names[opt.get(&m)] != "5" {
+		t.Errorf("the dropdown must start on 5: %v at %d", names, opt.get(&m))
+	}
+	opt.set(&m, 2)
+	if m.settings.Iterations != 3 {
+		t.Errorf("iterations = %d", m.settings.Iterations)
+	}
+}

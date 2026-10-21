@@ -193,13 +193,55 @@ func prTools(rv *reviewFlow) []mcpTool {
 				if strings.TrimSpace(a.Body) == "" {
 					return "", fmt.Errorf("invalid: the comment is empty")
 				}
-				c := &reviewCard{Path: a.Path, Line: a.Line, Body: levelPrefix(a.Level) + strings.TrimSpace(a.Body)}
+				c := &reviewCard{Path: a.Path, Line: a.Line, Level: a.Level, Body: levelPrefix(a.Level) + strings.TrimSpace(a.Body)}
 				c.label = fmt.Sprintf("%s:%d", a.Path, a.Line)
 				if start < a.Line {
 					c.Start = start
 					c.label = fmt.Sprintf("%s:%d–%d", a.Path, start, a.Line)
 				}
 				c.View = f.viewRange(start, a.Line)
+				return rv.propose(ctx, c), nil
+			},
+		},
+		{
+			Name: toolPrefix + "reopen",
+			Description: "Reopen a thread that was resolved too early, with a new argument (the thread is the id from pr_threads, and it must be resolved). " +
+				"Reopening is a real objection: level is critical or recommended. The user may reject it.",
+			Schema: `{"type":"object","properties":{"thread":{"type":"string"},"level":{"type":"string","enum":["critical","recommended"]},"body":{"type":"string"}},"required":["thread","level","body"]}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var a struct {
+					Thread string
+					Level  string
+					Body   string
+				}
+				if err := decode(raw, &a); err != nil {
+					return "", err
+				}
+				if a.Level != "critical" && a.Level != "recommended" {
+					return "", fmt.Errorf("invalid: reopen only for a critical or recommended problem; a note belongs in a reply")
+				}
+				if strings.TrimSpace(a.Body) == "" {
+					return "", fmt.Errorf("invalid: say why the thread should be open again")
+				}
+				resolved, found := false, false
+				if rv.data != nil {
+					for _, f := range rv.data.Files {
+						for _, t := range f.Threads {
+							if t.ID == a.Thread {
+								found, resolved = true, t.Resolved
+							}
+						}
+					}
+				}
+				switch {
+				case !found:
+					return "", fmt.Errorf("invalid: there is no thread %s; pr_threads lists them", a.Thread)
+				case !resolved:
+					return "", fmt.Errorf("invalid: that thread is already open; add to it with pr_reply")
+				}
+				c := &reviewCard{Thread: a.Thread, Level: a.Level, Reopen: true, Body: levelPrefix(a.Level) + strings.TrimSpace(a.Body),
+					label: "reopen · " + rv.threadLabel(a.Thread), Question: "Reopen this thread with your argument?"}
+				c.View, c.Quote = rv.threadContext(a.Thread)
 				return rv.propose(ctx, c), nil
 			},
 		},

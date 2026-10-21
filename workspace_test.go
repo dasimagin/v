@@ -575,3 +575,78 @@ func TestApplyPromptAndButton(t *testing.T) {
 		t.Fatalf("apply buttons = %d (on resolved: %d)", apply, applyOnResolved)
 	}
 }
+
+func TestDeletingYourOwnComments(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[{"id":"IC_mine","author":{"login":"me"},"body":"general mine","createdAt":"2026-01-01T00:00:00Z"},{"id":"IC_other","author":{"login":"x"},"body":"general other","createdAt":"2026-01-01T00:00:00Z"}]}`
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":2,"comments":{"nodes":[` +
+		`{"id":"RC_other","databaseId":9,"author":{"login":"r"},"body":"theirs","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"},` +
+		`{"id":"RC_mine","databaseId":10,"author":{"login":"me"},"body":"mine","createdAt":"2026-01-02T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(rangeDiff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Viewer = "me"
+	if d.Comments[0].NodeID != "IC_mine" || d.Files[0].Threads[0].Comments[1].NodeID != "RC_mine" {
+		t.Fatalf("node ids were not read: %+v", d.Comments)
+	}
+	m := newModel()
+	m.w, m.h, m.mode = 140, 40, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	lw := m.pickerListWidth()
+
+	deletes := func() (hits []prHit, rows []int) {
+		for r, hs := range m.picker.hits {
+			for _, h := range hs {
+				if h.kind == "delete" {
+					hits, rows = append(hits, h), append(rows, r)
+				}
+			}
+		}
+		return
+	}
+	click := func(h prHit, row int) tea.Cmd {
+		return m.previewClick(lw+1+h.x0, headerRows+row-m.picker.pscroll)
+	}
+	// In a file: only your reply in the thread has a ✕.
+	m.picker.sel = 1
+	m.pickerPreview()
+	hits, rows := deletes()
+	if len(hits) != 1 || hits[0].comment != 1 {
+		t.Fatalf("delete buttons in the file: %+v", hits)
+	}
+	if cmd := click(hits[0], rows[0]); cmd != nil || m.picker.armed != "RC_mine" {
+		t.Fatalf("the first click must only ask: cmd=%v armed=%q", cmd, m.picker.armed)
+	}
+	if cmd := click(hits[0], rows[0]); cmd == nil || m.picker.armed != "" {
+		t.Fatalf("the second click must delete: cmd=%v armed=%q", cmd, m.picker.armed)
+	}
+	// Another click in between disarms.
+	click(hits[0], rows[0])
+	m.previewClick(lw+1, headerRows+500)
+	if m.picker.armed != "" {
+		t.Error("a click elsewhere must disarm")
+	}
+	// A key press disarms too.
+	click(hits[0], rows[0])
+	m.pickerKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.picker.armed != "" {
+		t.Error("a key must disarm")
+	}
+	// In the conversation: your general comment, not the other one.
+	m.picker.sel = 0
+	m.pickerPreview()
+	hits, _ = deletes()
+	if len(hits) != 1 || hits[0].file != -1 || hits[0].comment != 0 {
+		t.Fatalf("delete buttons in the conversation: %+v", hits)
+	}
+	// Without your login nothing can be deleted.
+	d.Viewer = ""
+	m.picker.sel = 1
+	d.At++ // drop the cached previews
+	m.pickerPreview()
+	if hits, _ := deletes(); len(hits) != 0 {
+		t.Errorf("no viewer, no delete buttons: %+v", hits)
+	}
+}

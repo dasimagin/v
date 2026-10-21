@@ -1,17 +1,14 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -69,74 +66,6 @@ const (
 	reviewAuto   = "auto"
 )
 
-// runClaudeReview runs the reviewer: a one-shot, headless Claude Code with
-// the pr_* tools served by tools. Its thinking and tool calls go to emit; the
-// return value is its closing summary.
-func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData, tools []mcpTool, emit func(ev)) (string, error) {
-	model := s.Model
-	if env := os.Getenv("V_CLAUDE_MODEL"); env != "" {
-		model = env
-	}
-	srv, err := startMCP(tools)
-	if err != nil {
-		return "", err
-	}
-	defer srv.Close()
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "claude", "-p",
-		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
-		"--thinking-display", "summarized", // without it thinking blocks come empty
-		"--no-session-persistence",
-		"--strict-mcp-config", "--mcp-config", srv.Config("v"),
-		"--allowedTools", "Read,Grep,Glob,mcp__v,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git status:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(git ls-files:*)",
-		"--append-system-prompt", reviewSystemPrompt,
-		"--model", model, "--effort", s.Effort)
-	cmd.Dir = dir
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
-			cmd.Env = append(cmd.Env, kv)
-		}
-	}
-	cmd.Stdin = strings.NewReader(fmt.Sprintf("Review pull request #%d: %s", d.Number, d.Title))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start claude: %w", err)
-	}
-	var final *claudeMsg
-	sc := bufio.NewScanner(pipe)
-	sc.Buffer(make([]byte, 1<<20), 64<<20)
-	for sc.Scan() {
-		var msg claudeMsg
-		if json.Unmarshal(sc.Bytes(), &msg) != nil {
-			continue
-		}
-		if msg.Type == "result" {
-			final = &msg
-			continue
-		}
-		for _, e := range claudeEvents(msg, dir) {
-			emit(e)
-		}
-	}
-	_ = cmd.Wait()
-	if ctx.Err() != nil {
-		return "", fmt.Errorf("review stopped")
-	}
-	switch {
-	case final == nil:
-		return "", fmt.Errorf("claude: %s", firstOutputLine(stderr.String(), fmt.Errorf("no result")))
-	case final.IsError:
-		return "", fmt.Errorf("claude: %s", firstOutputLine(final.Result, fmt.Errorf("failed")))
-	}
-	return strings.TrimSpace(final.Result), nil
-}
-
 // newLines are the lines of the new file that a review comment can attach to.
 func (f prFile) newLines() map[int]bool {
 	lines := map[int]bool{}
@@ -187,14 +116,29 @@ func (f prFile) rangeOK(start, end int) bool {
 	return okA && okB && a == b && start <= end
 }
 
-// excerpt is the diff lines around new-file line n of f: a few before it and one after.
-func (f prFile) excerpt(n int) (lines []string, target int) {
-	var hunk []string
-	hit := -1
+// diffView is a few diff lines around a place in a file, with their line
+// numbers in the new file, for the cards the user answers.
+type diffView struct {
+	Lines    []string
+	Nums     []int // new-file line of each line; 0 for removed lines
+	From, To int   // the commented lines (inclusive), as indices into Lines
+}
+
+func (v diffView) empty() bool { return len(v.Lines) == 0 }
+
+// viewRange is the diff around new-file lines start..end of f: a few lines
+// before and after, from the one hunk that holds them.
+func (f prFile) viewRange(start, end int) diffView {
+	type row struct {
+		text string
+		num  int
+	}
+	var hunk []row
+	hitA, hitB := -1, -1
 	newN := 0
 	for _, l := range f.Patch {
 		if m := hunkPattern.FindStringSubmatch(l); m != nil {
-			if hit >= 0 {
+			if hitA >= 0 {
 				break
 			}
 			hunk = nil
@@ -204,35 +148,54 @@ func (f prFile) excerpt(n int) (lines []string, target int) {
 		if strings.HasPrefix(l, "diff --git") || newN == 0 || strings.HasPrefix(l, "\\") {
 			continue
 		}
+		num := 0
 		if !strings.HasPrefix(l, "-") {
-			if newN == n {
-				hit = len(hunk)
-			}
+			num = newN
 			newN++
 		}
-		hunk = append(hunk, l)
+		if num == start {
+			hitA = len(hunk)
+		}
+		if num == end {
+			hitB = len(hunk)
+		}
+		hunk = append(hunk, row{l, num})
 	}
-	if hit < 0 {
-		return nil, 0
+	if hitA < 0 {
+		return diffView{}
 	}
-	from, to := max(hit-4, 0), min(hit+2, len(hunk))
-	return hunk[from:to], hit - from
+	if hitB < hitA {
+		hitB = hitA
+	}
+	from, to := max(hitA-3, 0), min(hitB+3, len(hunk))
+	v := diffView{From: hitA - from, To: hitB - from}
+	for _, r := range hunk[from:to] {
+		v.Lines, v.Nums = append(v.Lines, r.text), append(v.Nums, r.num)
+	}
+	return v
+}
+
+// excerpt is the diff lines around new-file line n of f, and where n is in them.
+func (f prFile) excerpt(n int) (lines []string, target int) {
+	v := f.viewRange(n, n)
+	return v.Lines, v.From
 }
 
 // reviewCard is one proposal from the reviewer: an inline comment, or a reply
 // in an existing thread.
 type reviewCard struct {
 	Path     string
-	Line     int    // the last line of the comment
-	Start    int    // the first line of a multi-line comment, 0 for one line
-	Thread   string // set for a reply
-	Body     string // with its !! or ! prefix
-	Hunk     []string
-	Target   int    // index of the commented line in Hunk
-	Decision string // "", "y" or "n"
-	logAt    int    // its message in the chat
-	label    string // what the chat shows above it
-	Question string // what the choice menu asks; empty for the default
+	Line     int      // the last line of the comment
+	Start    int      // the first line of a multi-line comment, 0 for one line
+	Thread   string   // set for a reply
+	Body     string   // with its !! or ! prefix
+	View     diffView // the diff around the comment, for the card
+	Quote    []string // for a reply or a resolve: what the thread says
+	Decision string   // "", "y" or "n"
+	logAt    int      // its message in the chat
+	label    string   // what the chat shows above it
+	Question string   // what the choice menu asks; empty for the default
+	posted   bool     // sent to GitHub, or dropped
 }
 
 // reviewFlow is one /review in progress.
@@ -270,11 +233,6 @@ func (rv *reviewFlow) wait() tea.Cmd {
 // waiting reports whether a proposal needs an answer.
 func (rv *reviewFlow) waiting() bool { return rv != nil && rv.ask != nil }
 
-type reviewEventMsg struct { // thinking and tool calls of the reviewer
-	flow *reviewFlow
-	e    ev
-}
-
 type reviewAskMsg struct { // a proposal for the user to accept or skip
 	flow  *reviewFlow
 	card  *reviewCard
@@ -284,12 +242,6 @@ type reviewAskMsg struct { // a proposal for the user to accept or skip
 type reviewShownMsg struct { // a proposal accepted without asking
 	flow *reviewFlow
 	card *reviewCard
-}
-
-type reviewDoneMsg struct {
-	flow    *reviewFlow
-	summary string
-	err     error
 }
 
 type reviewPostedMsg struct {
@@ -393,8 +345,8 @@ func (rv *reviewFlow) withNotes(tools []mcpTool) []mcpTool {
 	return tools
 }
 
-// cmdReview has Claude review this branch's PR in the background and brings
-// its proposals to the chat.
+// cmdReview: /review make has a fresh Claude Code agent review this branch's
+// PR on its own screen; the other forms deal with your pending review.
 func (m *model) cmdReview(arg string) tea.Cmd {
 	switch arg {
 	case "submit", "discard", "":
@@ -404,17 +356,19 @@ func (m *model) cmdReview(arg string) tea.Cmd {
 		m.setErr("usage: /review [make | submit | discard]")
 		return nil
 	}
-	if m.rv != nil {
-		m.setErr("a review is already in progress")
+	switch {
+	case m.rv != nil || m.runScr != nil:
+		m.setErr("a run is already open: leave it with esc first")
 		return nil
-	}
-	if m.repo == nil || m.repo.Branch == "" || len(m.repo.pullRequests()) == 0 {
+	case m.busy || m.perm != nil:
+		m.setErr("wait for the agent to finish first")
+		return nil
+	case m.repo == nil || m.repo.Branch == "" || len(m.repo.pullRequests()) == 0:
 		m.setErr("no PR for this branch · /pr <url> to link one")
 		return nil
 	}
 	pr := m.repo.selectedPR()
-	repo, n := parsePRURL(pr.URL)
-	if repo == "" {
+	if repo, _ := parsePRURL(pr.URL); repo == "" {
 		m.setErr("reviews need a github.com PR link")
 		return nil
 	}
@@ -422,28 +376,47 @@ func (m *model) cmdReview(arg string) tea.Cmd {
 		m.setErr("Claude Code is not installed")
 		return nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	rv := &reviewFlow{url: pr.URL, repo: repo, dir: m.repo.Root, number: n, cancel: cancel, running: true,
-		auto: m.settings.ReviewMode == reviewAuto, out: make(chan tea.Msg, 256)}
-	m.rv = rv
-	m.showChat()
-	m.note("Claude is reviewing " + prLabel(*pr) + " · esc stops")
-	s := m.settings
-	go func() {
-		d, err := fetchPR(rv.dir, rv.url)
-		if err != nil {
-			rv.out <- reviewDoneMsg{flow: rv, err: err}
-			return
+	m.note("reading " + prLabel(*pr) + "…")
+	dir, url := m.repo.Root, pr.URL
+	return func() tea.Msg {
+		d, err := fetchPR(dir, url)
+		if err == nil {
+			err = checkedOutAt(dir, d)
 		}
-		if err := checkedOutAt(rv.dir, d); err != nil {
-			rv.out <- reviewDoneMsg{flow: rv, err: err}
-			return
-		}
-		rv.data = d
-		summary, err := runClaudeReview(ctx, rv.dir, s, d, rv.withNotes(prTools(rv)), func(e ev) { rv.out <- reviewEventMsg{rv, e} })
-		rv.out <- reviewDoneMsg{rv, summary, err}
-	}()
-	return rv.wait()
+		return reviewReadyMsg{d, err}
+	}
+}
+
+type reviewReadyMsg struct {
+	data *prData
+	err  error
+}
+
+// onReviewReady opens the review screen: a fresh agent with the pr_* tools
+// that propose comments, reading the code from the working tree.
+func (m *model) onReviewReady(msg reviewReadyMsg) tea.Cmd {
+	if msg.err != nil {
+		m.noteErr(msg.err.Error())
+		return nil
+	}
+	d := msg.data
+	auto := m.settings.ReviewMode == reviewAuto
+	if !m.enterRun("review", fmt.Sprintf("PR #%d", d.Number), auto) {
+		return nil
+	}
+	rv := &reviewFlow{url: d.URL, repo: d.Repo, number: d.Number, dir: m.repo.Root, data: d,
+		auto: auto, out: make(chan tea.Msg, 64), running: true}
+	m.rv, m.runScr.rv = rv, rv
+	m.runScr.tools = rv.withNotes(prTools(rv))
+	m.runScr.system = reviewSystemPrompt
+	mode := "asking about every comment"
+	if auto {
+		mode = "saving comments as a pending review"
+	}
+	m.note(fmt.Sprintf("a fresh agent is reviewing PR #%d, %s · type to guide it, esc leaves", d.Number, mode))
+	cmd := m.prompt(fmt.Sprintf("Review pull request #%d: %s", d.Number, d.Title))
+	m.armRun(rv)
+	return tea.Batch(cmd, rv.wait())
 }
 
 // showChat brings the chat forward, where the proposals appear.
@@ -452,25 +425,6 @@ func (m *model) showChat() {
 		m.push()
 		m.mode = modeChat
 	}
-}
-
-// onReviewEvent shows the reviewer's thinking and tool calls in the chat.
-func (m *model) onReviewEvent(msg reviewEventMsg) tea.Cmd {
-	rv := msg.flow
-	if rv != m.rv || !rv.running {
-		return nil
-	}
-	switch e := msg.e; e.kind {
-	case evThinkingStart:
-		m.log = append(m.log, message{kind: msgThinking})
-	case evThinking:
-		if n := len(m.log); n > 0 && m.log[n-1].kind == msgThinking {
-			m.log[n-1].text += e.text
-		}
-	case evTool:
-		m.log = append(m.log, message{kind: msgTool, text: strings.TrimPrefix(e.text, "mcp__v__")})
-	}
-	return rv.wait()
 }
 
 func (m *model) onReviewAsk(msg reviewAskMsg) tea.Cmd {
@@ -497,7 +451,7 @@ func (m *model) onReviewShown(msg reviewShownMsg) tea.Cmd {
 
 func (m *model) showCard(c *reviewCard, answer string) {
 	c.logAt = len(m.log)
-	m.log = append(m.log, message{kind: msgFinding, text: c.Body, file: c.label, hunk: c.Hunk, target: c.Target, answer: answer})
+	m.log = append(m.log, message{kind: msgFinding, text: c.Body, file: c.label, view: c.View, quote: c.Quote, answer: answer})
 }
 
 // reviewChoose takes y, n, a (accept the rest) or x (stop) for the proposal in
@@ -527,44 +481,31 @@ func (m *model) reviewChoose(k, note string) {
 	m.omni.Focus()
 }
 
-func (m *model) onReviewDone(msg reviewDoneMsg) tea.Cmd {
-	rv := msg.flow
-	if rv != m.rv {
-		return nil
-	}
-	rv.running, rv.cancel, rv.ask = false, nil, nil
-	switch {
-	case rv.dropped:
-		m.rv = nil
-		m.note("review dropped, nothing was posted")
-		return nil
-	case msg.err != nil:
-		m.rv = nil
-		m.noteErr(msg.err.Error())
-		return nil
-	}
-	if msg.summary != "" {
-		m.log = append(m.log, message{kind: msgAgent, text: msg.summary})
-	}
-	return m.postAccepted()
-}
-
-func (m *model) postAccepted() tea.Cmd {
-	rv := m.rv
+// finishReviewTurn publishes what the user accepted in this turn, once the agent stops.
+func (m *model) finishReviewTurn(rv *reviewFlow) tea.Cmd {
 	rv.mu.Lock()
 	var accepted []*reviewCard
 	for _, c := range rv.cards {
-		if c.Decision == "y" {
+		if c.Decision == "y" && !c.posted {
 			accepted = append(accepted, c)
+			if rv.dropped {
+				c.posted = true // dropped: never sent
+			}
 		}
 	}
 	rv.mu.Unlock()
-	if len(accepted) == 0 {
-		m.rv = nil
-		m.note("nothing posted")
+	if rv.dropped {
+		if len(accepted) > 0 {
+			m.note("review stopped, the accepted comments were not posted")
+		}
 		return nil
 	}
-	rv.running = true
+	if len(accepted) == 0 {
+		return nil
+	}
+	for _, c := range accepted {
+		c.posted = true
+	}
 	m.flash(fmt.Sprintf("posting %d comments to PR #%d…", len(accepted), rv.number))
 	return func() tea.Msg {
 		n, err := postReview(rv.dir, rv.repo, rv.number, accepted, rv.auto)
@@ -574,10 +515,6 @@ func (m *model) postAccepted() tea.Cmd {
 
 func (m *model) onReviewPosted(msg reviewPostedMsg) {
 	rv := msg.flow
-	if rv != m.rv {
-		return
-	}
-	m.rv = nil
 	if msg.err != nil {
 		m.noteErr(msg.err.Error())
 		return
@@ -611,13 +548,21 @@ func postReview(dir, repo string, number int, cards []*reviewCard, pending bool)
 		return 0, fmt.Errorf("install gh and run gh auth login to post reviews")
 	}
 	payload, n := reviewPayload(cards)
-	out, err := ghInput(dir, payload, "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number))
-	if err != nil {
-		return 0, fmt.Errorf("posting the review: %w", err)
-	}
 	var rev reviewReview
-	if err := json.Unmarshal(out, &rev); err != nil {
-		return 0, fmt.Errorf("posting the review: %w", err)
+	if existing, ok := findPendingReview(dir, repo, number); pending && ok {
+		// GitHub keeps one pending review per author: add to it.
+		rev = existing
+		if err := addToPendingReview(dir, rev.NodeID, cards); err != nil {
+			return 0, fmt.Errorf("adding to the pending review: %w", err)
+		}
+	} else {
+		out, err := ghInput(dir, payload, "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number))
+		if err != nil {
+			return 0, fmt.Errorf("posting the review: %w", err)
+		}
+		if err := json.Unmarshal(out, &rev); err != nil {
+			return 0, fmt.Errorf("posting the review: %w", err)
+		}
 	}
 	for _, c := range cards {
 		if c.Thread == "" || c.Decision != "y" {
@@ -754,4 +699,38 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// findPendingReview is your pending review of the PR, if there is one.
+func findPendingReview(dir, repo string, number int) (reviewReview, bool) {
+	out, err := ghOutput(dir, "api", "--paginate", "--jq", `.[] | select(.state=="PENDING") | "\(.id) \(.node_id)"`,
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number))
+	if err != nil {
+		return reviewReview{}, false
+	}
+	f := strings.Fields(string(out))
+	if len(f) < 2 {
+		return reviewReview{}, false
+	}
+	id, _ := strconv.ParseInt(f[0], 10, 64)
+	return reviewReview{ID: id, NodeID: f[1]}, true
+}
+
+// addToPendingReview adds the inline comments to an existing pending review.
+func addToPendingReview(dir, review string, cards []*reviewCard) error {
+	for _, c := range cards {
+		if c.Decision != "y" || c.Thread != "" {
+			continue
+		}
+		query := `mutation($review:ID!,$path:String!,$line:Int!,$body:String!){addPullRequestReviewThread(input:{pullRequestReviewId:$review,path:$path,line:$line,side:RIGHT,body:$body}){thread{id}}}`
+		vars := map[string]any{"review": review, "path": c.Path, "line": c.Line, "body": c.Body}
+		if c.Start > 0 && c.Start < c.Line {
+			query = `mutation($review:ID!,$path:String!,$line:Int!,$start:Int!,$body:String!){addPullRequestReviewThread(input:{pullRequestReviewId:$review,path:$path,line:$line,side:RIGHT,startLine:$start,startSide:RIGHT,body:$body}){thread{id}}}`
+			vars["start"] = c.Start
+		}
+		if _, err := ghGraphQL(dir, query, vars); err != nil {
+			return err
+		}
+	}
+	return nil
 }

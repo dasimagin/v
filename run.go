@@ -9,11 +9,13 @@ import (
 // its own agent, shown where the chat is. Esc leaves it and the chat you were
 // in comes back as it was.
 type runScreen struct {
-	kind  string // "review" or "apply"
-	title string
-	auto  bool
-	rv    *reviewFlow // the run's tools and proposals; kept until the screen closes
-	stash chatState   // the conversation to return to
+	kind   string // "review" or "apply"
+	title  string
+	auto   bool
+	rv     *reviewFlow // the run's tools and proposals; kept until the screen closes
+	tools  []mcpTool   // what the run's agent can call
+	system string      // added to its system prompt
+	stash  chatState   // the conversation to return to
 }
 
 // chatState is what makes up one conversation with an agent.

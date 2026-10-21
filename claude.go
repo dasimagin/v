@@ -45,7 +45,7 @@ type claudeMsg struct {
 
 // startClaude runs Claude Code in dir with the model and effort from s;
 // resume, if set, continues that session.
-func startClaude(dir string, s Settings, resume string, tools []mcpTool) (*claudeAgent, error) {
+func startClaude(dir string, s Settings, resume string, tools []mcpTool, system string) (*claudeAgent, error) {
 	model := s.Model
 	if env := os.Getenv("V_CLAUDE_MODEL"); env != "" {
 		model = env // only for testing v cheaply
@@ -56,7 +56,7 @@ func startClaude(dir string, s Settings, resume string, tools []mcpTool) (*claud
 		"--verbose",
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
-		"--append-system-prompt", systemPrompt,
+		"--append-system-prompt", strings.TrimSpace(systemPrompt+"\n\n"+system),
 		"--model", model, "--effort", s.Effort,
 		"--thinking-display", "summarized", // without it thinking blocks come empty
 	)

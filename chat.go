@@ -14,9 +14,9 @@ type message struct {
 	answer string // for msgAsk once answered: "y", "n" or "e" (saved the user's version)
 
 	// A review comment (msgFinding): where, the diff around it, and the commented line in it.
-	file   string
-	hunk   []string
-	target int
+	file  string
+	view  diffView // the diff around it
+	quote []string // for a reply: the thread it answers
 
 	// Rendered markdown of an agent reply, reused while text, width and
 	// theme stay the same.
@@ -145,10 +145,13 @@ func (m *model) renderLog(rows int) []string {
 				}
 				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╰─"), bg})
 			}
-			if len(msg.hunk) == 0 {
+			// The diff around the comment, with line numbers and a bar along the lines
+			// it is about; the comment sits under the last of them.
+			v := msg.view
+			if v.empty() {
 				comment() // not on a diff line
 			}
-			for j, l := range msg.hunk {
+			for j, l := range v.Lines {
 				st := dim
 				switch {
 				case strings.HasPrefix(l, "+"):
@@ -156,12 +159,20 @@ func (m *model) renderLog(rows int) []string {
 				case strings.HasPrefix(l, "-"):
 					st = bg.Foreground(c(cur.Deleted))
 				}
-				if j == msg.target {
-					st = st.Bold(true)
+				num, bar := "     ", bg.Render(" ")
+				if v.Nums[j] > 0 {
+					num = fmt.Sprintf("%4d ", v.Nums[j])
 				}
-				lines = append(lines, chatLine{dim.Render("│ "), st.Render(truncate(strings.ReplaceAll(l, "\t", "    "), width-2)), bg})
-				if j == msg.target {
-					comment() // right under the line it is about
+				if j >= v.From && j <= v.To {
+					st, bar = st.Bold(true), bg.Foreground(c(cur.Accent)).Render("▎")
+				}
+				text := truncate(strings.ReplaceAll(l, "\t", "    "), max(width-8, 1))
+				lines = append(lines, chatLine{dim.Render("│ "), dim.Render(num) + bar + bg.Render(" ") + st.Render(text), bg})
+				if j == v.To {
+					for _, q := range msg.quote {
+						lines = append(lines, chatLine{dim.Render("│ "), dim.Render("     ┆ ") + dim.Italic(true).Render(truncate(q, max(width-10, 1))), bg})
+					}
+					comment()
 				}
 			}
 		case msgError:

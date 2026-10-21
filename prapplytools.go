@@ -71,6 +71,7 @@ func applyTools(h *applyHub) []mcpTool {
 					return "", fmt.Errorf("invalid: a thread id and a body are required")
 				}
 				card := &reviewCard{Thread: a.Thread, Body: strings.TrimSpace(a.Body), label: "reply · " + rv.threadLabel(a.Thread), Question: "Post this reply to GitHub?"}
+				card.View, card.Quote = rv.threadContext(a.Thread)
 				if out, done := rv.gate(ctx, card, "reply"); done {
 					return out, nil
 				}
@@ -94,6 +95,7 @@ func applyTools(h *applyHub) []mcpTool {
 					return "", fmt.Errorf("invalid: a thread id is required")
 				}
 				card := &reviewCard{Thread: a.Thread, Body: "Mark the thread as resolved", label: "resolve · " + rv.threadLabel(a.Thread), Question: "Resolve this thread?"}
+				card.View, card.Quote = rv.threadContext(a.Thread)
 				if out, done := rv.gate(ctx, card, "resolution"); done {
 					return out, nil
 				}
@@ -148,6 +150,39 @@ func postThreadReply(dir, repo string, number int, thread, body string) error {
 // request number is part of the path; without it GitHub answers 404.
 func replyEndpoint(repo string, number int, comment int64) string {
 	return fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", repo, number, comment)
+}
+
+// threadContext is the code a thread is about and what it says, for the card
+// that asks about replying to it or resolving it.
+func (rv *reviewFlow) threadContext(id string) (diffView, []string) {
+	if rv.data == nil {
+		return diffView{}, nil
+	}
+	for _, f := range rv.data.Files {
+		for _, t := range f.Threads {
+			if t.ID != id {
+				continue
+			}
+			var quote []string
+			for i, c := range t.Comments {
+				if i == 2 {
+					quote = append(quote, fmt.Sprintf("… and %d more", len(t.Comments)-2))
+					break
+				}
+				first, _, _ := strings.Cut(strings.TrimSpace(c.Body), "\n")
+				quote = append(quote, "@"+c.Author+": "+first)
+			}
+			start := t.Start
+			if start == 0 || start > t.Line {
+				start = t.Line
+			}
+			if t.Line == 0 {
+				return diffView{}, quote
+			}
+			return f.viewRange(start, t.Line), quote
+		}
+	}
+	return diffView{}, nil
 }
 
 // threadLabel says where a thread is, for the cards the user answers.

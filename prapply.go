@@ -159,6 +159,7 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 	m.rv, m.runScr.rv = rv, rv
 	m.hub.set(rv)
 	m.toolsOn = true
+	m.runScr.tools = rv.withNotes(applyTools(m.hub))
 	noun := "threads"
 	if len(refs) == 1 {
 		noun = "thread"
@@ -194,21 +195,34 @@ func (m *model) resumeRunTurn() tea.Cmd {
 	return rv.wait()
 }
 
-// applyPermission answers the agent's tool requests during an apply run.
-// v's own tools gate themselves; in auto mode everything else is allowed
-// except what autoDeny refuses; in manual mode the user is asked as usual.
-func (m *model) applyPermission(p *permission) bool {
+// runPermission answers the agent's tool requests during a run. v's own tools
+// gate themselves. A review only reads: read tools and read-only git are
+// allowed, everything else refused. An apply run in auto mode may do anything
+// except what autoDeny refuses; in manual mode its edits and commands go to
+// the user as usual.
+func (m *model) runPermission(p *permission) bool {
 	rv := m.rv
-	if rv == nil || !rv.apply || m.agent == nil {
+	if rv == nil || m.agent == nil || m.runScr == nil {
 		return false
+	}
+	deny := func(reason string) bool {
+		m.noteErr("denied: " + reason)
+		_ = m.agent.Answer(p, false, reason)
+		return true
 	}
 	switch {
 	case ownTool(p.tool):
+	case !rv.apply: // a review
+		cmd, _ := p.input["command"].(string)
+		switch {
+		case readTools[p.tool]:
+		case p.tool == "Bash" && readOnlyGit(cmd):
+		default:
+			return deny("the reviewer reads the code; it does not edit files or run commands (read-only git is fine)")
+		}
 	case rv.auto:
 		if reason := autoDeny(p.tool, p.input); reason != "" {
-			m.noteErr("denied: " + reason)
-			_ = m.agent.Answer(p, false, reason)
-			return true
+			return deny(reason)
 		}
 	default:
 		return false
@@ -217,11 +231,12 @@ func (m *model) applyPermission(p *permission) bool {
 	return true
 }
 
-// finishApply ends the agent's turn in an apply run. The run itself goes on
-// until you leave: type again to guide the agent further.
-func (m *model) finishApply() {
+// finishRunTurn ends the agent's turn in a run. The run itself goes on until
+// you leave: type again to guide the agent further. A review publishes what
+// the user accepted, and a note that never reached the agent becomes its next message.
+func (m *model) finishRunTurn() {
 	rv := m.rv
-	if rv == nil || !rv.apply {
+	if rv == nil || m.runScr == nil {
 		return
 	}
 	m.rv = nil
@@ -230,4 +245,14 @@ func (m *model) finishApply() {
 	case rv.out <- reviewEndMsg{rv}: // lets the waiting command return
 	default:
 	}
+	var cmds []tea.Cmd
+	if !rv.apply {
+		cmds = append(cmds, m.finishReviewTurn(rv))
+	}
+	if rest := rv.takeNotes(); rest != "" && !rv.dropped {
+		// delivered only with a tool result so far; the turn is over, so send it now
+		cmds = append(cmds, m.resumeRunTurn(), m.prompt("Note from the user: "+rest))
+	}
+	rv.dropped = false
+	m.deferred = tea.Batch(cmds...)
 }

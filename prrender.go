@@ -55,14 +55,19 @@ type boxEntry struct {
 	at     time.Time
 	body   string
 	badges []badge
+	own    bool // yours: it gets a ✕ to delete it
 }
 
 // boxHits are the clickable spots in the header row of a box, as columns
 // [x0, x1) from the left edge of the preview.
 type boxHits struct {
 	state [2]int
-	btn   [][2]int // the right-aligned buttons, in order
+	btn   [][2]int // the right-aligned buttons of the first message, in order
+	del   []boxHit // the ✕ of the messages that are yours
 }
+
+// boxHit is a button in the header row of message `entry`, `row` rows below the top of the box.
+type boxHit struct{ row, x0, x1, entry int }
 
 // messageBox draws messages in a rounded frame, replies indented under the
 // first message. The frame takes the muted color when quiet is set. The first
@@ -94,16 +99,29 @@ func messageBox(entries []boxEntry, quiet bool, width int, state string, buttons
 			head += state
 			hits.state = [2]int{x0, 2 + lipgloss.Width(head)}
 		}
-		if i == 0 && len(buttons) > 0 { // right-aligned, so they are easy to find and click
-			group := strings.Join(buttons, bg.Render(" "))
+		var right []string // right-aligned, so they are easy to find and click
+		if i == 0 {
+			right = append(right, buttons...)
+		}
+		nFirst := len(right)
+		if e.own {
+			right = append(right, deleteButton())
+		}
+		if len(right) > 0 {
+			group := strings.Join(right, bg.Render(" "))
 			head += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(head)-lipgloss.Width(group)-2, 1)))
-			for j, b := range buttons {
+			for j, b := range right {
 				if j > 0 {
 					head += bg.Render(" ")
 				}
 				x0 := 2 + lipgloss.Width(head)
 				head += b
-				hits.btn = append(hits.btn, [2]int{x0, 2 + lipgloss.Width(head)})
+				span := [2]int{x0, 2 + lipgloss.Width(head)}
+				if j < nFirst {
+					hits.btn = append(hits.btn, span)
+				} else {
+					hits.del = append(hits.del, boxHit{row: len(out), x0: span[0], x1: span[1], entry: i})
+				}
 			}
 		}
 		out = append(out, rawLine(bg.Render("  ")+head))
@@ -121,10 +139,10 @@ func messageBox(entries []boxEntry, quiet bool, width int, state string, buttons
 
 // threadBox draws a review thread. Its state is a button: clicking it
 // resolves or reopens the thread.
-func threadBox(t prThread, width int) (previewLines, boxHits) {
+func threadBox(t prThread, width int, viewer string) (previewLines, boxHits) {
 	var entries []boxEntry
 	for i, c := range t.Comments {
-		e := boxEntry{author: c.Author, at: c.At, body: c.Body}
+		e := boxEntry{author: c.Author, at: c.At, body: c.Body, own: viewer != "" && c.Author == viewer && c.NodeID != ""}
 		if i == 0 && t.Start > 0 && t.Start < t.Line {
 			e.badges = append(e.badges, badge{fmt.Sprintf("lines %d–%d", t.Start, t.Line), hintStyle})
 		}
@@ -159,6 +177,11 @@ func stateButton(t prThread) string {
 // applyButton hands a thread to the agent to fix.
 func applyButton() string {
 	return buttonStyle.Render(" Apply ")
+}
+
+// deleteButton removes one of your comments from GitHub, after a second click.
+func deleteButton() string {
+	return bg.Foreground(lipgloss.Color(cur.Deleted)).Bold(true).Render(" ✕ ")
 }
 
 func replyButton() string {

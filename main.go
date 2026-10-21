@@ -47,8 +47,9 @@ type model struct {
 	rv                                   *reviewFlow // /review or /apply in progress
 	runScr                               *runScreen  // the run on screen, if any
 	hub                                  *applyHub   // points the chat agent's pr_* tools at the /apply run
-	toolsOn                              bool        // the chat agent gets v's pr_* tools (from the first /apply)
-	agentHasTools                        bool        // the running agent was started with them
+	toolsOn                              bool        // an apply run is open: its agent has the hub's tools
+	agentHasTools                        bool        // the running agent was started with tools
+	deferred                             tea.Cmd     // work an event handler hands to Update
 	repoSeq                              int
 	repoLoading, prLoading, repoChanging bool
 
@@ -206,18 +207,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prResolvedMsg:
 		m.onPRResolved(msg)
 		return m, nil
+	case prDeletedMsg:
+		return m, m.onPRDeleted(msg)
 	case prComposedMsg:
 		return m, m.onPRComposed(msg)
-	case reviewEventMsg:
-		return m, m.onReviewEvent(msg)
+	case reviewReadyMsg:
+		return m, m.onReviewReady(msg)
 	case reviewAskMsg:
 		return m, m.onReviewAsk(msg)
 	case reviewShownMsg:
 		return m, m.onReviewShown(msg)
 	case reviewEndMsg:
 		return m, nil
-	case reviewDoneMsg:
-		return m, m.onReviewDone(msg)
 	case reviewPostedMsg:
 		m.onReviewPosted(msg)
 		return m, nil
@@ -233,7 +234,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // from a session that /reset closed
 		}
 		m.onEvent(msg.e)
-		return m, m.agent.wait()
+		next := m.agent.wait()
+		if m.deferred != nil {
+			next, m.deferred = tea.Batch(next, m.deferred), nil
+		}
+		return m, next
 	case agentClosedMsg:
 		if msg.a == m.agent {
 			m.note("Claude Code exited")

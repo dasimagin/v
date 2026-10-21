@@ -49,7 +49,7 @@ func TestPRCommentAutoAndRejections(t *testing.T) {
 	if again, _ := callTool(t, rv, "pr_comment", `{"path":"f.go","line":2,"level":"critical","body":"bug here"}`); !strings.HasPrefix(again, "duplicate") {
 		t.Errorf("same comment twice: %q", again)
 	}
-	if len(rv.cards) != 1 || rv.cards[0].Body != "**!!** bug here" || len(rv.cards[0].Hunk) == 0 {
+	if len(rv.cards) != 1 || rv.cards[0].Body != "**!!** bug here" || rv.cards[0].View.empty() {
 		t.Errorf("cards = %+v", rv.cards)
 	}
 	payload, n := reviewPayload(rv.cards)
@@ -169,7 +169,7 @@ func TestFindingCardShowsCommentUnderItsLine(t *testing.T) {
 	m := &model{w: 80, h: 30}
 	m.log = []message{{
 		kind: msgFinding, file: "f.go:2", text: "**!!** bug here",
-		hunk: []string{" keep", "+new", " tail"}, target: 1,
+		view: diffView{Lines: []string{" keep", "+new", " tail"}, Nums: []int{1, 2, 3}, From: 1, To: 1},
 	}}
 	var out []string
 	for _, l := range m.renderLog(20) {
@@ -258,5 +258,35 @@ func TestCheckedOutAt(t *testing.T) {
 	d.HeadSHA = strings.Repeat("a", 40) // a commit this checkout does not have
 	if err := checkedOutAt(dir, d); err == nil || !strings.Contains(err.Error(), "check out feat") {
 		t.Errorf("a different head must be refused: %v", err)
+	}
+}
+
+func TestCardsShowNumberedDiffWithTheCoveredLines(t *testing.T) {
+	d := &prData{Files: splitDiff(rangeDiff)}
+	d.Files[0].Threads = []prThread{{ID: "T1", Start: 2, Line: 3, Comments: []prComment{{Author: "alice", Body: "extract this"}}}}
+	rv := &reviewFlow{data: d}
+	v := d.Files[0].viewRange(2, 4)
+	view, quote := rv.threadContext("T1")
+	m := &model{w: 90, h: 40}
+	m.log = []message{
+		{kind: msgFinding, file: "f.go:2–4", text: "**!** helper", view: v},
+		{kind: msgFinding, file: "reply", text: "done", view: view, quote: quote},
+	}
+	var out []string
+	for _, l := range m.renderLog(40) {
+		out = append(out, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	text := strings.Join(out, "\n")
+	for _, want := range []string{"   2 ▎  b", "   3 ▎ +c", "   4 ▎  d", "   1    a", "   5    e", "┆ @alice: extract this", "╭─ Claude · reply"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("card lacks %q:\n%s", want, text)
+		}
+	}
+	// The comment sits under the last covered line, before the context that follows.
+	if !(strings.Index(text, "4 ▎  d") < strings.Index(text, "! helper") && strings.Index(text, "! helper") < strings.Index(text, "   5    e")) {
+		t.Errorf("comment misplaced:\n%s", text)
+	}
+	if v := d.Files[0].viewRange(99, 99); !v.empty() {
+		t.Error("a line outside the diff has no view")
 	}
 }

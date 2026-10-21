@@ -18,7 +18,8 @@ import (
 )
 
 type prComment struct {
-	ID           int64 // REST id, for replying
+	ID           int64  // REST id, for replying
+	NodeID       string // GraphQL id, for deleting
 	Author, Body string
 	At           time.Time
 	Pending      bool // part of a review that is not submitted yet
@@ -57,6 +58,7 @@ type prData struct {
 	Base, Head, BaseSHA, HeadSHA          string
 	Draft                                 bool
 	Labels                                []string
+	Viewer                                string // your login: the comments by it can be deleted
 	At                                    int64
 }
 
@@ -100,10 +102,10 @@ func fetchPR(dir, url string) (*prData, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("reading a PR needs a github.com pull request link")
 	}
-	var view, diff, threads []byte
-	var errs [3]error
+	var view, diff, threads, viewer []byte
+	var errs [4]error
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
 		view, errs[0] = ghOutput(dir, "pr", "view", url, "--json", "number,title,body,author,state,reviews,comments,baseRefName,headRefName,baseRefOid,headRefOid,isDraft,labels")
@@ -117,13 +119,21 @@ func fetchPR(dir, url string) (*prData, error) {
 		owner, name, _ := strings.Cut(repo, "/")
 		threads, errs[2] = ghGraphQL(dir, threadsQuery, map[string]any{"owner": owner, "name": name, "n": n})
 	}()
+	go func() {
+		defer wg.Done()
+		viewer, errs[3] = ghOutput(dir, "api", "user", "--jq", ".login")
+	}()
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
 			return nil, err
 		}
 	}
-	return parsePR(repo, url, view, diff, threads)
+	d, err := parsePR(repo, url, view, diff, threads)
+	if err == nil {
+		d.Viewer = strings.TrimSpace(string(viewer))
+	}
+	return d, err
 }
 
 func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
@@ -145,6 +155,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 			SubmittedAt time.Time
 		}
 		Comments []struct {
+			ID        string
 			Author    struct{ Login string }
 			Body      string
 			CreatedAt time.Time
@@ -162,7 +173,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 		d.Reviews = append(d.Reviews, prReview{r.Author.Login, r.State, r.Body, r.SubmittedAt})
 	}
 	for _, c := range v.Comments {
-		d.Comments = append(d.Comments, prComment{Author: c.Author.Login, Body: c.Body, At: c.CreatedAt})
+		d.Comments = append(d.Comments, prComment{NodeID: c.ID, Author: c.Author.Login, Body: c.Body, At: c.CreatedAt})
 	}
 	d.Files = splitDiff(string(diff))
 	var res struct {
@@ -180,7 +191,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 	for _, t := range res.Data.Repository.PullRequest.ReviewThreads.Nodes {
 		th := prThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Line: t.Line, Start: t.StartLine}
 		for _, c := range t.Comments.Nodes {
-			th.Comments = append(th.Comments, prComment{ID: c.DatabaseID, Author: c.Author.Login, Body: c.Body, At: c.CreatedAt, Pending: c.State == "PENDING"})
+			th.Comments = append(th.Comments, prComment{ID: c.DatabaseID, NodeID: c.ID, Author: c.Author.Login, Body: c.Body, At: c.CreatedAt, Pending: c.State == "PENDING"})
 		}
 		for i := range d.Files {
 			if d.Files[i].Path == t.Path {
@@ -192,7 +203,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 }
 
 // threadsQuery reads the review threads of a PR: their state and every comment.
-const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{databaseId author{login} body createdAt state}}}}}}}`
+const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id databaseId author{login} body createdAt state}}}}}}}`
 
 type threadNode struct {
 	ID         string
@@ -203,6 +214,7 @@ type threadNode struct {
 	StartLine  int
 	Comments   struct {
 		Nodes []struct {
+			ID         string
 			DatabaseID int64
 			Author     struct{ Login string }
 			Body       string
@@ -320,7 +332,7 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 		out = append(out, line)
 		for _, i := range byLine[no] {
 			anchors[i] = len(out)
-			box, h := threadBox(f.Threads[i], width)
+			box, h := threadBox(f.Threads[i], width, d.Viewer)
 			out = append(out, box...)
 			hits[i] = h
 		}
@@ -329,7 +341,7 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 		out = append(out, nil, []seg{{"Outdated", chroma.Comment}})
 		for _, i := range loose {
 			anchors[i] = len(out)
-			box, h := threadBox(f.Threads[i], width)
+			box, h := threadBox(f.Threads[i], width, d.Viewer)
 			out = append(out, box...)
 			hits[i] = h
 		}
@@ -338,7 +350,7 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 }
 
 // conversationPreview is the PR itself: description, reviews and general comments.
-func (d *prData) conversationPreview(width int) previewLines {
+func (d *prData) conversationPreview(width int) (previewLines, map[int][]prHit) {
 	state := strings.ToLower(d.State)
 	if d.Draft {
 		state += ", draft"
@@ -371,12 +383,16 @@ func (d *prData) conversationPreview(width int) previewLines {
 		box, _ := messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width, "", "")
 		out = append(out, box...)
 	}
-	for _, c := range d.Comments {
+	convHits := map[int][]prHit{}
+	for ci, c := range d.Comments {
 		out = append(out, nil)
-		box, _ := messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width, "", "")
+		box, h := messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body, own: d.Viewer != "" && c.Author == d.Viewer && c.NodeID != ""}}, false, width, "")
+		for _, dh := range h.del {
+			convHits[len(out)+dh.row] = append(convHits[len(out)+dh.row], prHit{x0: dh.x0, x1: dh.x1, kind: "delete", file: -1, comment: ci})
+		}
 		out = append(out, box...)
 	}
-	return out
+	return out, convHits
 }
 
 // prAnchors remembers where each thread sits in a cached file preview, and
@@ -385,15 +401,17 @@ var (
 	prAnchors  = map[string][]int{}
 	prLineRows = map[string]map[int]int{}
 	prBoxHits  = map[string][]boxHits{}
+	prConvHits = map[string]map[int][]prHit{}
 )
 
 // prHit is a clickable spot in the preview: columns [x0, x1) of a row.
 type prHit struct {
-	x0, x1 int
-	kind   string // "reply", "resolve", "line" or "general"
-	file   int
-	thread int
-	line   int
+	x0, x1  int
+	kind    string // "reply", "resolve", "line" or "general"
+	file    int    // index in the PR's files; -1 for the conversation
+	thread  int
+	comment int
+	line    int
 }
 
 // prPreview builds the right pane for one list item: "" is the conversation,
@@ -434,6 +452,9 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 			p.hits[row] = append(p.hits[row], prHit{x0: 0, x1: width, kind: "line", file: fileAt, line: line})
 		}
 		for ti, row := range anchors {
+			for _, dh := range prBoxHits[key][ti].del {
+				p.hits[row+dh.row] = append(p.hits[row+dh.row], prHit{x0: dh.x0, x1: dh.x1, kind: "delete", file: fileAt, thread: ti, comment: dh.entry})
+			}
 			if t, h := f.Threads[ti], prBoxHits[key][ti]; t.ID != "" {
 				p.hits[row] = append(p.hits[row], prHit{x0: h.state[0], x1: h.state[1], kind: "resolve", file: fileAt, thread: ti})
 				for bi, kind := range []string{"reply", "apply"} {
@@ -447,7 +468,13 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	}
 	button := lipgloss.Width(commentButton.Render(" New comment "))
 	p.hits[0] = []prHit{{x0: width - 1 - button, x1: width - 1, kind: "general"}}
-	return cachedPreview(key, 0, func() previewLines {
-		return d.conversationPreview(width)
+	lines := cachedPreview(key, 0, func() previewLines {
+		lines, hits := d.conversationPreview(width)
+		prConvHits[key] = hits
+		return lines
 	})
+	for row, hs := range prConvHits[key] {
+		p.hits[row] = append(p.hits[row], hs...)
+	}
+	return lines
 }

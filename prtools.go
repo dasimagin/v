@@ -156,7 +156,7 @@ func prTools(rv *reviewFlow) []mcpTool {
 					c.Start = start
 					c.label = fmt.Sprintf("%s:%d–%d", a.Path, start, a.Line)
 				}
-				c.Hunk, c.Target = f.excerpt(a.Line)
+				c.View = f.viewRange(start, a.Line)
 				return rv.propose(ctx, c), nil
 			},
 		},

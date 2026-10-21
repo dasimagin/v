@@ -117,9 +117,14 @@ func (m *model) previewClick(x, y int) tea.Cmd {
 	}
 	rel := x - (m.pickerListWidth() + 1)
 	row := p.pscroll + y - headerRows
+	armed := p.armed
+	p.armed = "" // any other click disarms a delete
 	for _, h := range p.hits[row] {
 		if rel < h.x0 || rel >= h.x1 {
 			continue
+		}
+		if h.kind == "delete" {
+			p.armed = armed // deleteComment decides
 		}
 		if c := p.compose; c != nil {
 			// While a line comment is open, clicking another line of the same file
@@ -141,6 +146,8 @@ func (m *model) previewClick(x, y int) tea.Cmd {
 			return m.toggleThread(h.file, h.thread)
 		case "apply":
 			return m.applyThread(h.file, h.thread)
+		case "delete":
+			return m.deleteComment(h)
 		}
 	}
 	return nil
@@ -287,4 +294,63 @@ func reloadPR(dir, url string, seq int) tea.Cmd {
 		d, err := fetchPR(dir, url)
 		return prDiffMsg{seq, d, err}
 	}
+}
+
+type prDeletedMsg struct {
+	seq int
+	err error
+}
+
+// deleteComment removes one of your comments from GitHub. The first click on
+// its ✕ asks, the second one (on the same comment) does it.
+func (m *model) deleteComment(h prHit) tea.Cmd {
+	p := m.picker
+	var id string
+	var issue bool
+	if h.file < 0 {
+		if h.comment < len(p.pr.Comments) {
+			id, issue = p.pr.Comments[h.comment].NodeID, true
+		}
+	} else if h.file < len(p.pr.Files) && h.thread < len(p.pr.Files[h.file].Threads) {
+		if t := p.pr.Files[h.file].Threads[h.thread]; h.comment < len(t.Comments) {
+			id = t.Comments[h.comment].NodeID
+		}
+	}
+	if id == "" {
+		return nil
+	}
+	if p.armed != id {
+		p.armed = id
+		m.flash("click ✕ again to delete this comment from GitHub (it cannot be undone) · any other click cancels")
+		return nil
+	}
+	p.armed = ""
+	query := `mutation($id:ID!){deletePullRequestReviewComment(input:{id:$id}){clientMutationId}}`
+	if issue {
+		query = `mutation($id:ID!){deleteIssueComment(input:{id:$id}){clientMutationId}}`
+	}
+	prSeq++
+	p.seq = prSeq
+	seq, dir := p.seq, m.repo.Root
+	m.flash("deleting…")
+	return func() tea.Msg {
+		_, err := ghGraphQL(dir, query, map[string]any{"id": id})
+		return prDeletedMsg{seq, err}
+	}
+}
+
+// onPRDeleted reloads the PR so the comment is gone from the screen.
+func (m *model) onPRDeleted(msg prDeletedMsg) tea.Cmd {
+	p := m.picker
+	if p == nil || p.kind != "prdiff" || p.seq != msg.seq || p.pr == nil {
+		return nil
+	}
+	if msg.err != nil {
+		m.setErr(msg.err.Error())
+		return nil
+	}
+	m.flash("comment deleted")
+	prSeq++
+	p.seq = prSeq
+	return reloadPR(m.repo.Root, p.pr.URL, p.seq)
 }

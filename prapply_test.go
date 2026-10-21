@@ -62,7 +62,8 @@ func TestApplyPermissionByMode(t *testing.T) {
 		fa := &fakeAgent{}
 		m.agent = fa
 		m.rv = &reviewFlow{apply: true, auto: c.auto}
-		handled := m.applyPermission(&permission{tool: c.tool, input: c.input})
+		m.runScr = &runScreen{kind: "apply", rv: m.rv}
+		handled := m.runPermission(&permission{tool: c.tool, input: c.input})
 		if handled != c.handled {
 			t.Errorf("%s: handled = %v", c.name, handled)
 			continue
@@ -74,7 +75,7 @@ func TestApplyPermissionByMode(t *testing.T) {
 	// Outside an apply run nothing is decided for the user.
 	m := newModel()
 	m.agent = &fakeAgent{}
-	if m.applyPermission(&permission{tool: "mcp__v__pr_reply"}) {
+	if m.runPermission(&permission{tool: "mcp__v__pr_reply"}) {
 		t.Error("no run: leave it to the usual prompt")
 	}
 }
@@ -152,43 +153,82 @@ func TestApplyToolsAskInManualAndActInAuto(t *testing.T) {
 	}
 }
 
-func TestFinishApplyReleasesTheRun(t *testing.T) {
+func TestFinishRunTurnReleasesTheTurnAndKeepsTheRun(t *testing.T) {
 	m := newModel()
 	rv := &reviewFlow{apply: true, out: make(chan tea.Msg, 4)}
 	m.rv = rv
+	m.runScr = &runScreen{kind: "apply", rv: rv}
 	m.hub.set(rv)
-	m.finishApply()
+	m.finishRunTurn()
 	if m.rv != nil {
 		t.Error("the turn must be over")
 	}
-	if m.hub.get() == nil {
-		t.Error("the run's tools stay available until it is left")
+	if m.hub.get() == nil || m.runScr == nil {
+		t.Error("the run and its tools stay until it is left")
 	}
 	if _, ok := (<-rv.out).(reviewEndMsg); !ok {
 		t.Error("the waiting command must be released")
 	}
-	m.finishApply() // idempotent
-	// A review (not an apply) is left alone.
-	m.rv = &reviewFlow{apply: false}
-	m.finishApply()
-	if m.rv == nil {
-		t.Error("finishApply must not end a /review")
+	m.finishRunTurn() // idempotent
+}
+
+func TestReviewTurnPostsWhatWasAcceptedOnce(t *testing.T) {
+	m := newModel()
+	rv := &reviewFlow{repo: "o/r", number: 7, out: make(chan tea.Msg, 4), cards: []*reviewCard{
+		{Path: "f.go", Line: 2, Body: "a", Decision: "y"},
+		{Path: "f.go", Line: 3, Body: "b", Decision: "n"},
+	}}
+	m.rv, m.runScr = rv, &runScreen{kind: "review", rv: rv}
+	m.finishRunTurn()
+	if m.deferred == nil || !rv.cards[0].posted || rv.cards[1].posted {
+		t.Fatalf("accepted card must be on its way, rejected untouched: deferred=%v posted=%v/%v", m.deferred != nil, rv.cards[0].posted, rv.cards[1].posted)
+	}
+	// A second turn with nothing new accepted posts nothing.
+	m.deferred = nil
+	m.rv = rv
+	m.finishRunTurn()
+	if m.deferred != nil {
+		t.Error("nothing new was accepted")
+	}
+	// A dropped review sends nothing and forgets the accepted comments.
+	rv2 := &reviewFlow{out: make(chan tea.Msg, 4), dropped: true, cards: []*reviewCard{{Decision: "y", Body: "x"}}}
+	m.rv, m.runScr = rv2, &runScreen{kind: "review", rv: rv2}
+	m.finishRunTurn()
+	if m.deferred != nil || !rv2.cards[0].posted {
+		t.Error("a dropped review must not be posted")
 	}
 }
 
-func TestReplyEndpointHasThePullNumber(t *testing.T) {
-	if got := replyEndpoint("o/r", 7, 99); got != "repos/o/r/pulls/7/comments/99/replies" {
-		t.Errorf("endpoint = %q", got)
+func TestReviewerMayOnlyRead(t *testing.T) {
+	for cmd, ok := range map[string]bool{
+		"git diff origin/main...HEAD": true, "git log --oneline -5": true, "git show abc123": true, "git blame f.go": true,
+		"git push": false, "git commit -am x": false, "git diff; rm -rf /": false, "git log | sh": false, "go test ./...": false, "git diff > out": false,
+	} {
+		if got := readOnlyGit(cmd); got != ok {
+			t.Errorf("readOnlyGit(%q) = %v", cmd, got)
+		}
 	}
-}
-
-func TestThreadLabelNamesThePlace(t *testing.T) {
-	rv := &reviewFlow{data: &prData{Files: []prFile{{Path: "git.go", Threads: []prThread{{ID: "T1", Line: 42, Comments: []prComment{{Author: "alice"}}}}}}}}
-	if got := rv.threadLabel("T1"); got != "git.go:42 (@alice)" {
-		t.Errorf("label = %q", got)
-	}
-	if got := rv.threadLabel("nope"); got != "thread nope" {
-		t.Errorf("unknown = %q", got)
+	m := newModel()
+	fa := &fakeAgent{}
+	m.agent = fa
+	rv := &reviewFlow{} // a review: apply is false
+	m.rv, m.runScr = rv, &runScreen{kind: "review", rv: rv}
+	for _, c := range []struct {
+		tool  string
+		input map[string]any
+		allow bool
+	}{
+		{"Read", nil, true},
+		{"Grep", nil, true},
+		{"mcp__v__pr_comment", nil, true},
+		{"Bash", map[string]any{"command": "git diff HEAD~1"}, true},
+		{"Bash", map[string]any{"command": "go test ./..."}, false},
+		{"Edit", map[string]any{"file_path": "f.go"}, false},
+	} {
+		fa.allow = nil
+		if !m.runPermission(&permission{tool: c.tool, input: c.input}) || len(fa.allow) != 1 || fa.allow[0] != c.allow {
+			t.Errorf("%s %v: answers = %v", c.tool, c.input, fa.allow)
+		}
 	}
 }
 

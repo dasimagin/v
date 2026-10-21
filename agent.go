@@ -77,11 +77,11 @@ func (m *model) onEvent(e ev) {
 	case evToolError:
 		m.noteErr(e.text)
 	case evAsk:
-		if !m.applyPermission(e.perm) {
+		if !m.runPermission(e.perm) {
 			m.ask(e.perm)
 		}
 	case evDone:
-		m.finishApply()
+		m.finishRunTurn()
 		m.busy = false
 		switch {
 		case m.interrupted:
@@ -209,11 +209,16 @@ func (m *model) connect() tea.Cmd {
 	if m.resumeNext {
 		resume = m.sessionID
 	}
+	// A run's agent is always Claude Code, with the run's tools and rules.
+	var a backend
+	var err error
 	var tools []mcpTool
-	if m.toolsOn && m.settings.Agent != agentCodex {
-		tools = applyTools(m.hub)
+	if r := m.runScr; r != nil {
+		tools = r.tools
+		a, err = startClaude(m.workdir, m.settings, resume, tools, r.system)
+	} else {
+		a, err = startBackend(m.workdir, m.settings, resume, nil)
 	}
-	a, err := startBackend(m.workdir, m.settings, resume, tools)
 	if err != nil {
 		m.resumeNext = resume != ""
 		m.noteErr(err.Error())
@@ -228,7 +233,7 @@ func startBackend(dir string, s Settings, resume string, tools []mcpTool) (backe
 	if s.Agent == agentCodex {
 		return startCodex(dir, s, resume)
 	}
-	return startClaude(dir, s, resume, tools)
+	return startClaude(dir, s, resume, tools, "")
 }
 
 // sendQueued sends the next queued prompt once the agent is idle.

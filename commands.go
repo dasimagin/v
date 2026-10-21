@@ -36,7 +36,10 @@ var commands = []*Command{
 		Name: "show", Desc: "Browse this branch's history", Run: (*model).cmdShow,
 	},
 	{
-		Name: "pr", Args: "[review | URL | number | auto]", Desc: "Read this branch's PR, or choose or link one", Run: (*model).cmdPR,
+		Name: "review", Args: "[submit | discard]", Desc: "Have Claude review this PR; submit publishes a pending review", Run: (*model).cmdReview,
+	},
+	{
+		Name: "pr", Args: "[URL | number | auto]", Desc: "Read this branch's PR, or choose or link one", Run: (*model).cmdPR,
 	},
 	{
 		Name: "open",

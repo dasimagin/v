@@ -14,6 +14,8 @@ type Settings struct {
 	Model  string `json:"model"`  // Claude Code --model
 	Effort string `json:"effort"` // Claude Code --effort
 
+	ReviewMode string `json:"review_mode"` // "manual": accept each comment; "auto": post at once as a pending review
+
 	DiffBefore int `json:"diff_before"` // lines of context before each change, in every diff
 	DiffAfter  int `json:"diff_after"`  // and after it
 
@@ -23,7 +25,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude", DiffBefore: 3, DiffAfter: 3}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual"}
 }
 
 // models are the choices for the agent's model, best first.

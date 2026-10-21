@@ -13,6 +13,11 @@ type message struct {
 	text   string
 	answer string // for msgAsk once answered: "y", "n" or "e" (saved the user's version)
 
+	// A review comment (msgFinding): where, the diff around it, and the commented line in it.
+	file   string
+	hunk   []string
+	target int
+
 	// Rendered markdown of an agent reply, reused while text, width and
 	// theme stay the same.
 	md      []string
@@ -30,6 +35,7 @@ const (
 	msgAsk                     // a tool call waiting for, or given, the user's answer
 	msgThinking                // the model's thinking, collapsed unless expanded
 	msgError                   // an error from the agent or a tool
+	msgFinding                 // a review comment with its diff, waiting for y or n
 )
 
 // note adds a message from v to the chat log.
@@ -108,6 +114,41 @@ func (m *model) renderLog(rows int) []string {
 				lines = append(lines, chatLine{errStyle.Render("✗ "), toolLine(msg.text, hintStyle, dim), bg})
 			case "e":
 				lines = append(lines, chatLine{accentStyle.Render("✎ "), toolLine(msg.text, hintStyle, dim) + dim.Render(" · your version"), bg})
+			}
+		case msgFinding:
+			gap()
+			mark := bg.Foreground(c(cur.Type)).Bold(true).Render("? ")
+			switch msg.answer {
+			case "y":
+				mark = bg.Foreground(c(cur.Added)).Render("✓ ")
+			case "n":
+				mark = errStyle.Render("✗ ")
+			}
+			lines = append(lines, chatLine{mark, bg.Foreground(c(cur.Fg)).Bold(true).Render(truncate(msg.file, width)), bg})
+			comment := func() {
+				bar := bg.Foreground(c(cur.Accent)).Render("┃ ")
+				for _, l := range strings.Split(lipgloss.NewStyle().Width(max(width-4, 1)).Render(msg.text), "\n") {
+					lines = append(lines, chatLine{dim.Render("│ "), bar + bg.Foreground(c(cur.Fg)).Render(strings.TrimRight(l, " ")), bg})
+				}
+			}
+			if len(msg.hunk) == 0 {
+				comment() // not on a diff line
+			}
+			for j, l := range msg.hunk {
+				st := dim
+				switch {
+				case strings.HasPrefix(l, "+"):
+					st = bg.Foreground(c(cur.Added))
+				case strings.HasPrefix(l, "-"):
+					st = bg.Foreground(c(cur.Deleted))
+				}
+				if j == msg.target {
+					st = st.Bold(true)
+				}
+				lines = append(lines, chatLine{dim.Render("│ "), st.Render(truncate(strings.ReplaceAll(l, "\t", "    "), width-2)), bg})
+				if j == msg.target {
+					comment() // right under the line it is about
+				}
 			}
 		case msgError:
 			add(errStyle.Render("✗ "), msg.text, errStyle, bg)

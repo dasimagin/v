@@ -202,7 +202,8 @@ func TestPRPreviewPlacesComments(t *testing.T) {
 		t.Fatalf("parse: %+v %v", d, err)
 	}
 	var texts []string
-	for _, line := range d.filePreview(d.Files[0], 60) {
+	lines, _ := d.filePreview(d.Files[0], 60)
+	for _, line := range lines {
 		s := ""
 		for _, g := range line {
 			s += g.text

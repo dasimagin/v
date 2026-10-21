@@ -44,6 +44,7 @@ type model struct {
 	repo                                 *repository
 	repoMenu                             *repoMenu
 	picker                               *workspacePicker
+	rv                                   *reviewFlow // /review in progress
 	repoSeq                              int
 	repoLoading, prLoading, repoChanging bool
 
@@ -151,7 +152,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			if m.mode == modePick && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() && msg.X < m.pickerListWidth() {
-				if i := m.picker.top + msg.Y - headerRows; i < len(m.picker.items) {
+				first := headerRows
+				if m.picker.kind == "prdiff" {
+					if msg.Y == headerRows {
+						m.openListMenu()
+						return m, nil
+					}
+					first++
+				}
+				if i := m.picker.top + msg.Y - first; i < len(m.picker.items) {
 					m.picker.sel = i
 					return m, m.choosePicker()
 				}
@@ -192,11 +201,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onRepository(msg)
 	case prDiffMsg:
 		return m, m.onPRDiff(msg)
-	case prReviewMsg:
-		m.onPRReview(msg)
+	case reviewDoneMsg:
+		return m, m.onReviewDone(msg)
+	case reviewPostedMsg:
+		m.onReviewPosted(msg)
 		return m, nil
-	case prPostMsg:
-		return m, m.onPRPost(msg)
+	case reviewActionMsg:
+		if msg.err != nil {
+			m.setErr(msg.err.Error())
+		} else {
+			m.note(msg.text)
+		}
+		return m, nil
 	case agentEvent:
 		if msg.a != m.agent {
 			return m, nil // from a session that /reset closed
@@ -235,6 +251,15 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k == "ctrl+t" {
 		m.openViewMenu()
 		return m, nil
+	}
+	if m.rv != nil && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" {
+		switch k {
+		case "y", "n", "a":
+			return m, m.reviewAnswer(k)
+		case "esc":
+			m.reviewEsc()
+			return m, nil
+		}
 	}
 	if !m.showChoices() {
 		switch k {
@@ -544,6 +569,10 @@ func (m model) View() string {
 
 func (m model) hint() string {
 	switch {
+	case m.rv.waiting() && m.perm == nil:
+		return "accept this comment? y yes · n skip · a accept the rest · esc drop the review"
+	case m.rv != nil && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
+		return "Claude is reviewing… · esc stops"
 	case m.mode == modePick:
 		switch m.picker.kind {
 		case "workdir":
@@ -553,7 +582,7 @@ func (m model) hint() string {
 		case "show":
 			return "search commits · ↑↓ select · shift+↑↓ scroll · esc back"
 		case "prdiff":
-			return "search files · ↑↓ select · shift+↑↓ scroll · ctrl+r review with Claude · ctrl+s post drafts · esc back"
+			return "search · ↑↓ select · shift+↑↓ scroll · ctrl+l files/comments · esc back"
 		}
 		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
 	case m.repoMenu != nil:

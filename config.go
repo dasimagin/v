@@ -175,6 +175,21 @@ var options = []option{
 			return nil
 		},
 	},
+	{
+		label:  "Review mode",
+		desc:   "/review: manual asks about each comment; auto sends them at once as a pending review you publish later",
+		values: func(*model) []string { return []string{"Manual", "Auto"} },
+		get: func(m *model) int {
+			if m.settings.ReviewMode == reviewAuto {
+				return 1
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.ReviewMode = []string{reviewManual, reviewAuto}[i]
+			return nil
+		},
+	},
 }
 
 // contextIndex is the dropdown entry closest to n lines of context.

@@ -40,14 +40,6 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 		m.setErr("select a Git branch to link a PR")
 		return nil
 	}
-	if arg == "review" {
-		prs := m.repo.pullRequests()
-		if len(prs) == 0 {
-			m.setErr("no PR for this branch · /pr <url> to link one")
-			return nil
-		}
-		return m.openPR(*m.repo.selectedPR(), true)
-	}
 	if arg == "auto" {
 		if m.repo.Link == "" {
 			return m.refreshRepository(true)
@@ -72,7 +64,7 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 	}
 	prs := m.repo.pullRequests()
 	if len(prs) == 1 || (len(prs) > 1 && m.repo.Link != "") {
-		return m.openPR(*m.repo.selectedPR(), false)
+		return m.openPR(*m.repo.selectedPR())
 	}
 	if len(prs) <= 1 {
 		switch {
@@ -130,6 +122,13 @@ func (m *model) repoMenuKey(msg tea.KeyMsg) tea.Cmd {
 		if n > 0 {
 			it := items[mu.sel]
 			m.repoMenu = nil
+			if mu.kind == "list" {
+				if p := m.picker; p != nil {
+					p.list, p.sel, p.top = []string{"files", "comments"}[it.index], 0, 0
+					m.rebuildPicker()
+				}
+				return nil
+			}
 			if o, ok := agentOptions[mu.kind]; ok {
 				changed := o.get(m) != it.index
 				_ = o.set(m, it.index)
@@ -267,7 +266,7 @@ func (m *model) renderRepoMenu() []string {
 		s = truncate(s, max(width-1, 1))
 		return st.Render(s + strings.Repeat(" ", max(width-lipgloss.Width(s), 0)))
 	}
-	title := map[string]string{"pr": "Pull requests", "model": "Model", "effort": "Effort"}[mu.kind]
+	title := map[string]string{"pr": "Pull requests", "model": "Model", "effort": "Effort", "list": "Show in the list"}[mu.kind]
 	if title == "" {
 		title = "Branches"
 	}

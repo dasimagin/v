@@ -219,16 +219,17 @@ func commentLines(c prComment, width int) previewLines {
 }
 
 // filePreview is the file's patch with its review comments under the lines they belong to.
-func (d *prData) filePreview(f prFile, width int) previewLines {
-	byLine := map[string][]prComment{}
-	var loose []prComment
-	for _, c := range f.Comments {
+func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
+	byLine := map[string][]int{}
+	var loose []int
+	for i, c := range f.Comments {
 		if c.Line == 0 {
-			loose = append(loose, c)
+			loose = append(loose, i)
 			continue
 		}
-		byLine[c.Side+strconv.Itoa(c.Line)] = append(byLine[c.Side+strconv.Itoa(c.Line)], c)
+		byLine[c.Side+strconv.Itoa(c.Line)] = append(byLine[c.Side+strconv.Itoa(c.Line)], i)
 	}
+	anchors := make([]int, len(f.Comments))
 	var out previewLines
 	oldN, newN := 0, 0
 	patch := false
@@ -268,17 +269,19 @@ func (d *prData) filePreview(f prFile, width int) previewLines {
 			segs = []seg{{l, tok}}
 		}
 		out = append(out, segs)
-		for _, c := range byLine[key] {
-			out = append(out, commentLines(c, width)...)
+		for _, i := range byLine[key] {
+			anchors[i] = len(out)
+			out = append(out, commentLines(f.Comments[i], width)...)
 		}
 	}
 	if len(loose) > 0 {
 		out = append(out, nil, []seg{{"Outdated comments", chroma.Comment}})
-		for _, c := range loose {
-			out = append(out, commentLines(c, width)...)
+		for _, i := range loose {
+			anchors[i] = len(out)
+			out = append(out, commentLines(f.Comments[i], width)...)
 		}
 	}
-	return out
+	return out, anchors
 }
 
 // conversationPreview is the PR itself: description, reviews and general comments.
@@ -321,22 +324,42 @@ func (d *prData) conversationPreview(width int) previewLines {
 	return out
 }
 
-// prPreview builds the right pane for one list item; path "" is the conversation.
-func (p *workspacePicker) prPreview(path string, width int) previewLines {
+// prAnchors remembers where each comment sits in a cached file preview.
+var prAnchors = map[string][]int{}
+
+// prPreview builds the right pane for one list item: "" is the conversation,
+// "summary" the draft review text, "f:c" comment c of file f, else a path.
+// For a comment, p.focus is the row to scroll to.
+func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	d := p.pr
+	p.focus = 0
 	if d == nil {
 		return nil
 	}
-	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d", d.At, path, width, d.Number, diffBefore, diffAfter)
-	return cachedPreview(key, 0, func() previewLines {
-		if path == "" {
-			return d.conversationPreview(width)
-		}
-		for _, f := range d.Files {
-			if f.Path == path {
-				return d.filePreview(f, width)
+	fileAt, commentAt := -1, -1
+	if a, b, ok := strings.Cut(value, ":"); ok {
+		fileAt, _ = strconv.Atoi(a)
+		commentAt, _ = strconv.Atoi(b)
+	} else if value != "" {
+		for i, f := range d.Files {
+			if f.Path == value {
+				fileAt = i
 			}
 		}
-		return nil
+	}
+	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d", d.At, value, width, d.Number, diffBefore, diffAfter)
+	if fileAt >= 0 && fileAt < len(d.Files) {
+		lines := cachedPreview(key, 0, func() previewLines {
+			lines, anchors := d.filePreview(d.Files[fileAt], width)
+			prAnchors[key] = anchors
+			return lines
+		})
+		if anchors := prAnchors[key]; commentAt >= 0 && commentAt < len(anchors) {
+			p.focus = anchors[commentAt]
+		}
+		return lines
+	}
+	return cachedPreview(key, 0, func() previewLines {
+		return d.conversationPreview(width)
 	})
 }

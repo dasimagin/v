@@ -34,10 +34,8 @@ type workspacePicker struct {
 	pkey             string
 	pr               *prData // /pr
 	loadErr          string
-	busy             string // "review" or "post" while it runs
-	cancel           func()
-	confirm          bool // the next ctrl+s posts
-	autoReview       bool // start a review once the PR is loaded
+	list             string // "files" or "comments" on the left
+	focus            int    // row of the preview to bring into view
 	seq              int
 }
 
@@ -100,9 +98,6 @@ func (m *model) closePicker(clear bool) {
 	if m.mode == modePick {
 		m.pop()
 	}
-	if m.picker != nil && m.picker.cancel != nil {
-		m.picker.cancel()
-	}
 	m.picker = nil
 	if clear {
 		m.omni.SetValue("")
@@ -150,20 +145,7 @@ func (m *model) rebuildPicker() {
 		if d := p.pr; d == nil {
 			p.err = p.loadErr
 		} else {
-			if score, ok := fuzzyScore(p.query, "conversation"); ok {
-				p.items = append(p.items, pickItem{value: "", label: "Conversation", score: score, current: true})
-			}
-			for _, f := range d.Files {
-				score, ok := fuzzyScore(p.query, f.Path)
-				if !ok {
-					continue
-				}
-				label := f.Path
-				if n := len(f.Comments); n > 0 {
-					label += fmt.Sprintf("  (%d)", n)
-				}
-				p.items = append(p.items, pickItem{value: f.Path, label: label, score: score})
-			}
+			p.prItems(d)
 		}
 	} else if p.kind == "show" {
 		p.dir = m.workdir
@@ -305,7 +287,7 @@ func (m *model) movePicker(delta int, wrap bool) {
 	} else {
 		p.sel = min(max(p.sel+delta, 0), n-1)
 	}
-	rows := m.bodyRows()
+	rows := m.pickerRows()
 	p.top = min(max(p.top, p.sel-rows+1), p.sel)
 }
 
@@ -355,10 +337,6 @@ func (m *model) chooseFile() tea.Cmd {
 
 func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	p := m.picker
-	if k := msg.String(); p.confirm && k != "ctrl+s" {
-		p.confirm = false
-		m.status = ""
-	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closePicker(true)
@@ -390,15 +368,11 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 		p.cycling = true
 		m.setOmni("/" + p.kind + " " + p.items[p.sel].value)
 		return nil
-	case "ctrl+r":
+	case "ctrl+l":
 		if p.kind == "prdiff" {
-			return m.startReview()
+			m.openListMenu()
+			return nil
 		}
-	case "ctrl+s":
-		if p.kind == "prdiff" {
-			return m.postDrafts()
-		}
-		return nil
 	case "shift+up", "shift+down":
 		p.pscroll += 3 * map[string]int{"shift+up": -1, "shift+down": 1}[msg.String()]
 		return nil
@@ -458,7 +432,7 @@ func (m *model) cmdShow(string) tea.Cmd {
 var prSeq int
 
 // openPR reads the PR from GitHub and shows its files, diff and comments.
-func (m *model) openPR(pr pullRequest, review bool) tea.Cmd {
+func (m *model) openPR(pr pullRequest) tea.Cmd {
 	if m.perm != nil {
 		m.setErr("answer the agent's request before reading a PR")
 		return nil
@@ -470,7 +444,7 @@ func (m *model) openPR(pr pullRequest, review bool) tea.Cmd {
 	}
 	p, focus := m.openBare("prdiff")
 	prSeq++
-	p.seq, p.loadErr, p.autoReview = prSeq, "Loading "+prLabel(pr)+"…", review
+	p.seq, p.loadErr, p.list = prSeq, "Loading "+prLabel(pr)+"…", "files"
 	m.rebuildPicker()
 	dir, url, seq := m.repo.Root, pr.URL, p.seq
 	return tea.Batch(focus, func() tea.Msg {
@@ -490,9 +464,12 @@ func (m *model) onPRDiff(msg prDiffMsg) tea.Cmd {
 		p.pr = msg.data
 	}
 	m.rebuildPicker()
-	if p.pr != nil && p.autoReview {
-		p.autoReview = false
-		return m.startReview()
+	if p.pr == nil {
+		return nil
+	}
+	if res, ok := reviews[p.pr.URL]; ok {
+		p.pr.applyReview(res)
+		m.rebuildPicker()
 	}
 	return nil
 }
@@ -527,15 +504,12 @@ func (m *model) renderPicker(rows int) []string {
 		}
 	}
 	info := fmt.Sprintf("%s · %d matches", tildify(p.dir), len(p.items))
-	switch p.busy {
-	case "review":
-		info += " · Claude is reviewing… (esc stops)"
-	case "post":
-		info += " · posting…"
-	}
 	out := m.header(fgStyle.Bold(true).Render(title), info, "")
 	lw := m.pickerListWidth()
 	var left []string
+	if p.kind == "prdiff" {
+		left = append(left, m.listSwitcher(lw))
+	}
 	if len(p.items) == 0 {
 		note := "No matches · keep typing or edit the query"
 		if p.err != "" {
@@ -614,7 +588,7 @@ func (m *model) previewPane(width, rows int) []string {
 	lines := m.pickerPreview()
 	if k := p.kind + "\x00"; len(p.items) > 0 {
 		if k += p.items[p.sel].value; k != p.pkey {
-			p.pkey, p.pscroll = k, 0
+			p.pkey, p.pscroll = k, max(p.focus-2, 0)
 		}
 	}
 	p.pscroll = min(max(p.pscroll, 0), max(len(lines)-rows, 0))
@@ -627,4 +601,80 @@ func (m *model) previewPane(width, rows int) []string {
 		}
 	}
 	return out
+}
+
+// pickerRows is how many list rows fit; the PR screens keep one for the list switcher.
+func (m *model) pickerRows() int {
+	if m.picker != nil && m.picker.kind == "prdiff" {
+		return m.bodyRows() - 1
+	}
+	return m.bodyRows()
+}
+
+// prItems fills the left list of a PR screen: files, or comments.
+func (p *workspacePicker) prItems(d *prData) {
+	if p.list != "comments" {
+		if score, ok := fuzzyScore(p.query, "conversation"); ok {
+			p.items = append(p.items, pickItem{value: "", label: "Conversation", score: score, current: true})
+		}
+		for _, f := range d.Files {
+			score, ok := fuzzyScore(p.query, f.Path)
+			if !ok {
+				continue
+			}
+			label := f.Path
+			if n := len(f.Comments); n > 0 {
+				label += fmt.Sprintf("  (%d)", n)
+			}
+			p.items = append(p.items, pickItem{value: f.Path, label: label, score: score})
+		}
+		return
+	}
+	if score, ok := fuzzyScore(p.query, "conversation"); ok {
+		p.items = append(p.items, pickItem{value: "", label: "Conversation", score: score, current: true})
+	}
+	for fi, f := range d.Files {
+		for ci, c := range f.Comments {
+			first, _, _ := strings.Cut(strings.TrimSpace(c.Body), "\n")
+			label := fmt.Sprintf("%s:%d  %s", filepath.Base(f.Path), c.Line, first)
+			if c.Draft {
+				label += "  · draft"
+			}
+			score, ok := fuzzyScore(p.query, f.Path+" "+c.Body)
+			if ok {
+				p.items = append(p.items, pickItem{value: fmt.Sprintf("%d:%d", fi, ci), label: label, score: score})
+			}
+		}
+	}
+	if len(p.items) == 0 && p.query == "" {
+		p.err = "No comments here"
+	}
+}
+
+// listSwitcher is the first row of the left list; clicking it, or ctrl+l, opens the list menu.
+func (m *model) listSwitcher(width int) string {
+	p := m.picker
+	n := 0
+	label := "Files"
+	if p.pr != nil {
+		for _, f := range p.pr.Files {
+			n += len(f.Comments)
+		}
+		if p.list == "comments" {
+			label = fmt.Sprintf("Comments · %d", n)
+		} else {
+			label = fmt.Sprintf("Files · %d", len(p.pr.Files))
+		}
+	}
+	text := truncate(" ▾ "+label, width)
+	return accentStyle.Bold(true).Render(text + strings.Repeat(" ", max(width-lipgloss.Width(text), 0)))
+}
+
+func (m *model) openListMenu() {
+	p := m.picker
+	mu := &repoMenu{kind: "list", items: []repoItem{{label: "Files", index: 0}, {label: "Comments", index: 1}}}
+	if p.list == "comments" {
+		mu.sel = 1
+	}
+	m.repoMenu, m.menu, m.viewMenu = mu, nil, nil
 }

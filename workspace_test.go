@@ -858,54 +858,15 @@ func TestBrandShimmers(t *testing.T) {
 	brandPhase = 0
 }
 
-func TestSplashShowsLogoAndATipSideBySide(t *testing.T) {
-	var out []string
-	for _, l := range splash("Works on my machine...", 0, 130, 22) {
-		out = append(out, ansi.Strip(l))
-	}
-	text := strings.Join(out, "\n")
-	for _, want := range []string{"██╗", "Works on my machine...", tips[0].title, "╭─ @alice"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("start screen lacks %q", want)
-		}
-	}
-	for i, l := range out {
-		if lw := ansi.StringWidth(l); lw != 130 {
-			t.Fatalf("row %d is %d wide, want 130", i, lw)
-		}
-	}
-	for _, l := range out {
-		if a, b := strings.Index(l, "██╗"), strings.Index(l, "│"); a >= 0 && b >= 0 && a > b {
-			t.Errorf("the logo must be left of the card: %q", l)
-		}
-	}
-	// A narrow window keeps just the logo, centered.
-	var narrow []string
-	for _, l := range splash("x", 0, 40, 22) {
-		narrow = append(narrow, ansi.Strip(l))
-	}
-	if strings.Contains(strings.Join(narrow, "\n"), tips[0].title) {
-		t.Error("no room for a card in 40 columns")
-	}
-	// Every tip fits and draws.
-	for i := range tips {
-		for _, l := range splash("x", i, 100, 24) {
-			if ansi.StringWidth(l) != 100 {
-				t.Fatalf("tip %d: a row is %d wide", i, ansi.StringWidth(l))
-			}
-		}
-	}
-}
-
-func TestResetChangesTheTipWithTheJoke(t *testing.T) {
+func TestResetChangesTheJoke(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		m := newModel()
 		m.hub = &applyHub{}
-		m.tip, m.tagline = i%len(tips), i%len(taglines)
-		oldTip, oldJoke := m.tip, m.tagline
+		m.tagline = i % len(taglines)
+		old := m.tagline
 		m.cmdReset("")
-		if m.tip == oldTip || m.tagline == oldJoke || m.mode != modeSplash {
-			t.Fatalf("tip %d→%d, joke %d→%d, mode %v", oldTip, m.tip, oldJoke, m.tagline, m.mode)
+		if m.tagline == old || m.mode != modeSplash {
+			t.Fatalf("joke %d→%d, mode %v", old, m.tagline, m.mode)
 		}
 	}
 }
@@ -921,7 +882,7 @@ func TestEveryJokeFitsTheStartScreen(t *testing.T) {
 		}
 		seen[j] = true
 		for _, w := range []int{130, 90, 60} {
-			rows := splash(j, 2, w, 24)
+			rows := splash(j, w, 24)
 			if len(rows) != 24 {
 				t.Fatalf("%d rows", len(rows))
 			}
@@ -934,7 +895,7 @@ func TestEveryJokeFitsTheStartScreen(t *testing.T) {
 	}
 	// The logo and the joke share one axis: the first joke line is centered under the logo.
 	var rows []string
-	for _, r := range splash("Short joke", 2, 130, 24) {
+	for _, r := range splash("Short joke", 130, 24) {
 		rows = append(rows, ansi.Strip(r))
 	}
 	logoMid, jokeMid := -1, -1

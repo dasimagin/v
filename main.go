@@ -35,7 +35,6 @@ type model struct {
 	menu         *menu
 	dismissed    string // omnibox value the menu was closed with Esc for
 	tagline      int
-	tip          int    // the card on the start screen
 	status       string // transient error; replaces the hint until the next Enter
 	statusInfo   bool   // status is a notice, not an error
 	discardArmed bool   // Esc once more leaves a file with unsaved changes
@@ -94,7 +93,7 @@ func newModel() model {
 	ti.Placeholder = placeholder
 	ti.Focus()
 	dir, _ := os.Getwd()
-	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified, hub: &applyHub{}, tip: rand.IntN(len(tips))}
+	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified, hub: &applyHub{}}
 	m.styleOmni()
 	m.hist = loadHistory()
 	return m
@@ -557,7 +556,7 @@ func (m model) View() string {
 		for _, l := range m.header("", "", "") {
 			line(l)
 		}
-		for _, l := range splash(taglines[m.tagline], m.tip, m.w, rows) {
+		for _, l := range splash(taglines[m.tagline], m.w, rows) {
 			line(l)
 		}
 	case modeChat:

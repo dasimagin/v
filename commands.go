@@ -173,7 +173,6 @@ func (m *model) cmdReset(string) tea.Cmd {
 		next++
 	}
 	m.tagline = next
-	m.tip = (m.tip + 1 + rand.IntN(len(tips)-1)) % len(tips) // a different tip, with the new joke
 	return nil
 }
 

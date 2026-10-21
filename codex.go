@@ -257,7 +257,7 @@ func (a *codexAgent) notification(m rpcMsg) {
 			a.emit(ev{kind: evTool, text: "Bash " + shellCommand(p.Item.Command)})
 		case "fileChange":
 			a.changes[p.Item.ID] = p.Item.Changes
-			a.emit(ev{kind: evTool, text: changeSummary(p.Item.Changes)})
+			a.emit(ev{kind: evTool, text: changeSummary(p.Item.Changes, a.dir)})
 		case "mcpToolCall":
 			a.emit(ev{kind: evTool, text: p.Item.Tool})
 		case "webSearch":
@@ -285,10 +285,10 @@ func (a *codexAgent) serverRequest(m rpcMsg) {
 		a.emit(ev{kind: evAsk, perm: &permission{id: m.ID, summary: "Bash " + shellCommand(p.Command)}})
 	case "item/fileChange/requestApproval":
 		changes := a.changes[p.ItemID]
-		perm := &permission{id: m.ID, summary: changeSummary(changes)}
+		perm := &permission{id: m.ID, summary: changeSummary(changes, a.dir)}
 		if len(changes) == 1 {
 			c := changes[0]
-			perm.propose = func() (*Doc, error) { return codexProposal(c) }
+			perm.propose = func() (*Doc, error) { return codexProposal(c, a.dir) }
 		}
 		a.emit(ev{kind: evAsk, perm: perm})
 	default:
@@ -382,7 +382,7 @@ func shellCommand(c string) string {
 	return c
 }
 
-func changeSummary(changes []codexChange) string {
+func changeSummary(changes []codexChange, dirs ...string) string {
 	switch len(changes) {
 	case 0:
 		return "Edit"
@@ -394,13 +394,16 @@ func changeSummary(changes []codexChange) string {
 		case "delete":
 			verb = "Delete"
 		}
-		return verb + " " + shortPath(changes[0].Path)
+		return verb + " " + shortPath(changes[0].Path, dirs...)
 	}
 	return fmt.Sprintf("Edit %d files", len(changes))
 }
 
 // codexProposal builds the file as Codex's change would leave it.
-func codexProposal(c codexChange) (*Doc, error) {
+func codexProposal(c codexChange, dirs ...string) (*Doc, error) {
+	if len(dirs) > 0 {
+		c.Path = workPath(dirs[0], c.Path)
+	}
 	cur, err := os.ReadFile(c.Path)
 	exists := err == nil
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

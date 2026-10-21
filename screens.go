@@ -4,14 +4,13 @@ package main
 type screen struct {
 	mode      mode
 	doc       *Doc
-	browser   *Browser
 	top, left int
 }
 
 // push saves the current screen before opening another one on top.
 func (m *model) push() {
 	m.viewMenu = nil
-	m.stack = append(m.stack, screen{m.mode, m.doc, m.browser, m.top, m.left})
+	m.stack = append(m.stack, screen{m.mode, m.doc, m.top, m.left})
 }
 
 // pop returns to the previous screen, or to the chat when there is none.
@@ -23,5 +22,5 @@ func (m *model) pop() {
 	}
 	s := m.stack[len(m.stack)-1]
 	m.stack = m.stack[:len(m.stack)-1]
-	m.mode, m.doc, m.browser, m.top, m.left = s.mode, s.doc, s.browser, s.top, s.left
+	m.mode, m.doc, m.top, m.left = s.mode, s.doc, s.top, s.left
 }

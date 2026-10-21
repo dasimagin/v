@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // viewMenu is the open view-mode dropdown in the header.
@@ -65,23 +64,23 @@ func (m *model) cursorAt(n int) int {
 
 // modeLabel is the dropdown button in the top right corner.
 func (m *model) modeLabel() string {
-	if m.doc.Base == nil {
-		return " " + viewModeNames[viewFlat] + " "
+	if m.fileMode() && m.doc.Base == nil {
+		return " " + viewModeNames[viewFlat] + " ▾ "
 	}
 	return " " + viewModeNames[*m.curMode()] + " ▾ "
 }
 
-// openViewMenu opens the dropdown, or explains why there is none.
+// openViewMenu also works outside a file: it picks the next file's view mode.
 func (m *model) openViewMenu() {
-	if m.doc.Base == nil {
-		m.setErr("not in a git repository: diffs are off")
-		return
-	}
+	m.repoMenu, m.menu = nil, nil
 	m.viewMenu = &viewMenu{sel: int(*m.curMode())}
 }
 
 func (m *model) setViewMode(v viewMode) {
 	*m.curMode(), m.viewMenu, m.top = v, nil, 0
+	if m.fileMode() && m.doc.Base == nil && v != viewFlat {
+		m.flash("diff needs Git history · showing Flat for this file")
+	}
 }
 
 // viewMenuKey handles keys while the dropdown is open.
@@ -110,27 +109,8 @@ func menuWidth() int {
 
 // viewClick handles a left click in view mode at screen cell (x, y).
 func (m *model) viewClick(x, y int) {
-	labelW := lipgloss.Width(m.modeLabel())
-	if y == headerTitleRow && x >= m.w-labelW-1 && x < m.w-1 {
-		if m.viewMenu != nil {
-			m.viewMenu = nil
-		} else {
-			m.openViewMenu()
-		}
-		return
-	}
-	if m.viewMenu == nil {
-		if y >= headerRows && y < headerRows+m.bodyRows() {
-			m.clickText(x, y-headerRows)
-		}
-		return
-	}
-	if m.viewMenu != nil {
-		if i := y - headerRows; i >= 0 && i < len(viewModeNames) && x >= m.w-menuWidth()-1 {
-			m.setViewMode(viewMode(i))
-			return
-		}
-		m.viewMenu = nil
+	if y >= headerRows && y < headerRows+m.bodyRows() {
+		m.clickText(x, y-headerRows)
 	}
 }
 
@@ -138,7 +118,7 @@ func (m *model) viewClick(x, y int) {
 func (m *model) renderView(rows int) []string {
 	d := m.doc
 	total := m.rowCount()
-	title := pathTitle(d.Path, false)
+	title := m.pathTitle(d.Path, false)
 	if d.Review != "" {
 		title = buttonOpen.Render(" proposed "+d.Review+" ") + bg.Render("  ") + title
 	}
@@ -149,14 +129,7 @@ func (m *model) renderView(rows int) []string {
 	if d.Ed.On {
 		info = "editing · " + info
 	}
-	labelStyle := buttonOff
-	switch {
-	case d.Base != nil && m.viewMenu != nil:
-		labelStyle = buttonOpen
-	case d.Base != nil:
-		labelStyle = buttonStyle
-	}
-	out := m.header(title, info, labelStyle.Render(m.modeLabel()))
+	out := m.header(title, info, "")
 
 	var body []string
 	switch m.effectiveMode() {
@@ -166,21 +139,6 @@ func (m *model) renderView(rows int) []string {
 		body = m.renderUnified(rows)
 	case viewSplit:
 		body = m.renderSplit(rows)
-	}
-	if m.viewMenu != nil {
-		// The list hangs under the button, right-aligned with it.
-		mw := menuWidth()
-		for i, name := range viewModeNames {
-			item := "  " + name + strings.Repeat(" ", mw-2-lipgloss.Width(name))
-			st := lipgloss.NewStyle().Background(lipgloss.Color(cur.Panel)).Foreground(lipgloss.Color(cur.Fg))
-			if i == m.viewMenu.sel {
-				item = "› " + item[2:]
-				st = buttonStyle
-			}
-			if i < len(body) {
-				body[i] = ansi.Truncate(body[i], m.w-mw-1, "") + st.Render(item) + bg.Render(" ")
-			}
-		}
 	}
 	return append(out, body...)
 }

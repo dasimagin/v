@@ -87,7 +87,7 @@ func startClaude(dir string, s Settings, resume string) (*claudeAgent, error) {
 		for sc.Scan() {
 			var m claudeMsg
 			if json.Unmarshal(sc.Bytes(), &m) == nil {
-				for _, e := range claudeEvents(m) {
+				for _, e := range claudeEvents(m, dir) {
 					a.events <- e
 				}
 			}
@@ -155,7 +155,7 @@ func (a *claudeAgent) Close() {
 }
 
 // claudeEvents translates one CLI message.
-func claudeEvents(msg claudeMsg) []ev {
+func claudeEvents(msg claudeMsg, dirs ...string) []ev {
 	switch msg.Type {
 	case "system":
 		if msg.Subtype == "init" {
@@ -190,7 +190,7 @@ func claudeEvents(msg claudeMsg) []ev {
 		var out []ev
 		for _, b := range blocks(msg.Message) {
 			if b.Type == "tool_use" {
-				out = append(out, ev{kind: evTool, text: toolSummary(b.Name, b.Input)})
+				out = append(out, ev{kind: evTool, text: toolSummary(b.Name, b.Input, dirs...)})
 			}
 		}
 		return out
@@ -212,9 +212,9 @@ func claudeEvents(msg claudeMsg) []ev {
 		if json.Unmarshal(msg.Request, &req) != nil || req.Subtype != "can_use_tool" {
 			return nil
 		}
-		p := &permission{id: msg.RequestID, summary: toolSummary(req.ToolName, req.Input), input: req.Input}
+		p := &permission{id: msg.RequestID, summary: toolSummary(req.ToolName, req.Input, dirs...), input: req.Input}
 		if reviewTools[req.ToolName] {
-			p.propose = func() (*Doc, error) { return proposedDoc(req.ToolName, req.Input) }
+			p.propose = func() (*Doc, error) { return proposedDoc(req.ToolName, req.Input, dirs...) }
 		}
 		return []ev{{kind: evAsk, perm: p}}
 	case "result":

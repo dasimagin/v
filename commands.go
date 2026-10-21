@@ -7,7 +7,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,17 +20,29 @@ type Command struct {
 	Desc    string
 	// Complete lists candidates for the argument being typed: keep is the part of
 	// arg that stays, cands are the options for the rest. nil if no completion.
-	Complete func(arg string) (keep string, cands []string)
+	Complete func(dir, arg string) (keep string, cands []string)
 	Run      func(m *model, arg string) tea.Cmd
 }
 
 var commands = []*Command{
 	{
-		Name:     "open",
-		Args:     "[path]",
-		Desc:     "Open a file or list a directory",
-		Complete: completePath,
-		Run:      (*model).cmdOpen,
+		Name: "workdir", Args: "[directory]", Desc: "Find and choose the working directory",
+		Run: (*model).cmdWorkdir,
+	},
+	{
+		Name: "switch", Aliases: []string{"branch"}, Args: "[name]", Desc: "Find and switch Git branches", Run: (*model).cmdSwitch,
+	},
+	{
+		Name: "show", Desc: "Browse this branch's history", Run: (*model).cmdShow,
+	},
+	{
+		Name: "pr", Args: "[URL | number | auto]", Desc: "Show, select or link this branch's PR", Run: (*model).cmdPR,
+	},
+	{
+		Name: "open",
+		Args: "[path]",
+		Desc: "Find and open a file",
+		Run:  (*model).cmdOpen,
 	},
 	{
 		Name: "config",
@@ -85,6 +96,10 @@ func (c *Command) matchesPrefix(p string) bool {
 
 // run executes an omnibox line.
 func (m *model) run(input string) tea.Cmd {
+	if m.repoChanging {
+		m.setErr("wait for the Git operation to finish")
+		return nil
+	}
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return nil
@@ -110,46 +125,30 @@ func (m *model) run(input string) tea.Cmd {
 	return c.Run(m, strings.TrimSpace(arg))
 }
 
-// cmdOpen opens a file, or lists a directory; no argument lists the working
-// directory. A missing file is created empty, like `touch`.
-func (m *model) cmdOpen(arg string) tea.Cmd {
-	path := expandHome(arg)
-	if path == "" {
-		path = "."
-	}
-	fi, err := os.Stat(path)
+func (m *model) cmdOpen(arg string) tea.Cmd { return m.openPicker("open", arg) }
+
+// openPath opens a file; a missing one is created empty, like `touch`.
+func (m *model) openPath(path string) {
+	_, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		if err := createFile(path); err != nil {
 			m.setErr(err.Error())
-			return nil
+			return
 		}
-		m.note("created " + shortPath(path))
-		m.openFile(path)
-		return nil
-	}
-	if err != nil {
+		m.note("created " + shortPath(path, m.workdir))
+	} else if err != nil {
 		m.setErr(err.Error())
-		return nil
-	}
-	if fi.IsDir() {
-		b, err := NewBrowser(path, "")
-		if err != nil {
-			m.setErr(err.Error())
-			return nil
-		}
-		m.push()
-		m.browser, m.mode = b, modeBrowse
-		return nil
+		return
 	}
 	m.openFile(path)
-	return nil
 }
 
 // cmdReset drops the session and shows the splash with a new tagline.
 func (m *model) cmdReset(string) tea.Cmd {
 	m.stopAgent()
 	m.sessionID, m.resumeNext = "", false
-	m.log, m.doc, m.browser, m.stack = nil, nil, nil, nil
+	m.log, m.doc, m.stack = nil, nil, nil
+	m.picker = nil
 	m.mode, m.status = modeSplash, ""
 	next := rand.IntN(len(taglines) - 1)
 	if next >= m.tagline {
@@ -183,32 +182,6 @@ func (m *model) openFile(path string) {
 	}
 	m.push()
 	m.doc, m.top, m.left, m.mode = d, 0, 0, modeView
-}
-
-// completePath completes a file system path; directories end with "/".
-func completePath(arg string) (string, []string) {
-	keep, prefix := filepath.Split(arg)
-	dir := expandHome(keep)
-	if dir == "" {
-		dir = "."
-	}
-	des, err := os.ReadDir(dir)
-	if err != nil {
-		return keep, nil
-	}
-	var cands []string
-	for _, de := range des {
-		name := de.Name()
-		if !strings.HasPrefix(name, prefix) || (strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".")) {
-			continue
-		}
-		if fi, err := os.Stat(filepath.Join(dir, name)); err == nil && fi.IsDir() {
-			name += "/"
-		}
-		cands = append(cands, name)
-	}
-	sort.Strings(cands)
-	return keep, cands
 }
 
 func expandHome(p string) string {

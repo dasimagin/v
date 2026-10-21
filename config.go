@@ -215,12 +215,7 @@ func (m *model) configKey(k string) bool {
 			_ = o.set(m, c.pick) // live preview
 		case "enter", " ":
 			c.open = false
-			if err := m.settings.save(); err != nil {
-				m.setErr("save settings: " + err.Error())
-			}
-			if o.apply != nil && c.pick != c.orig {
-				o.apply(m)
-			}
+			m.saveOption(o, c.pick != c.orig)
 		case "esc", "left":
 			c.open = false
 			_ = o.set(m, c.orig)
@@ -243,6 +238,16 @@ func (m *model) configKey(k string) bool {
 		return false
 	}
 	return true
+}
+
+// saveOption stores a chosen value and, when it changed, applies it.
+func (m *model) saveOption(o option, changed bool) {
+	if err := m.settings.save(); err != nil {
+		m.setErr("save settings: " + err.Error())
+	}
+	if o.apply != nil && changed {
+		o.apply(m)
+	}
 }
 
 const previewSrc = `// Preview of the syntax theme.

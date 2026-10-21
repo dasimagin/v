@@ -261,5 +261,5 @@ func (m *model) save() {
 	}
 	d.Ed.Dirty = false
 	m.discardArmed = false
-	m.flash("saved " + shortPath(d.Path))
+	m.flash("saved " + shortPath(d.Path, m.workdir))
 }

@@ -12,11 +12,11 @@ import (
 )
 
 // toolSummary is a one-line description of a tool call, e.g. "Edit main.go".
-func toolSummary(name string, in map[string]any) string {
+func toolSummary(name string, in map[string]any, dirs ...string) string {
 	for _, k := range []string{"file_path", "command", "pattern", "path", "url", "description"} {
 		if v, ok := in[k].(string); ok && v != "" {
 			if k == "file_path" || k == "path" {
-				v = shortPath(v)
+				v = shortPath(v, dirs...)
 			}
 			v = strings.SplitN(v, "\n", 2)[0]
 			return name + " " + v
@@ -33,14 +33,14 @@ func fromUser(line string) bool {
 }
 
 // shortPath shows a path relative to the working directory when it is inside it.
-func shortPath(p string) string {
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
+func shortPath(p string, dirs ...string) string {
+	wd, _ := os.Getwd()
+	if len(dirs) > 0 {
+		wd = dirs[0]
 	}
-	if wd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return rel
-		}
+	p = workPath(wd, p)
+	if rel, err := filepath.Rel(wd, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel
 	}
 	return tildify(p)
 }
@@ -179,10 +179,14 @@ func (m *model) prompt(text string) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
+	if m.workspaceNotice != "" {
+		text = "[Workspace context: " + m.workspaceNotice + "]\n\n" + text
+	}
 	if err := m.agent.Prompt(text); err != nil {
 		m.note(err.Error())
 		return cmd
 	}
+	m.workspaceNotice = ""
 	m.busy = true
 	return cmd
 }
@@ -192,7 +196,7 @@ func (m *model) prompt(text string) tea.Cmd {
 func (m *model) connect() tea.Cmd {
 	resume := ""
 	if m.agent != nil && m.agentStale && !m.busy {
-		// New model or effort: restart on the same session.
+		// New model, effort or workdir: reconnect on the same session.
 		resume = m.sessionID
 		m.stopAgent()
 	}
@@ -200,15 +204,15 @@ func (m *model) connect() tea.Cmd {
 		return nil
 	}
 	if m.resumeNext {
-		resume, m.resumeNext = m.sessionID, false
+		resume = m.sessionID
 	}
-	dir, _ := os.Getwd()
-	a, err := startBackend(dir, m.settings, resume)
+	a, err := startBackend(m.workdir, m.settings, resume)
 	if err != nil {
+		m.resumeNext = resume != ""
 		m.noteErr(err.Error())
 		return nil
 	}
-	m.agent = a
+	m.agent, m.resumeNext = a, false
 	return a.wait()
 }
 
@@ -254,22 +258,28 @@ func (m *model) agentChanged() {
 // agentLabel names the agent, model and effort: "Opus 5.5 · high",
 // "Codex · GPT-6.1-Sol · high".
 func (m *model) agentLabel() string {
+	model, effort := m.agentParts()
+	return model + " · " + effort
+}
+
+// agentParts are the model and effort labels, each a dropdown in the status line.
+func (m *model) agentParts() (model, effort string) {
 	s := m.settings
 	if s.Agent != agentCodex {
-		return modelName(s.Model) + " · " + s.Effort
+		return modelName(s.Model), s.Effort
 	}
-	model, effort := s.CodexModel, s.CodexEffort
-	if model == "" {
-		model = codexDefault().ID
+	id, effort := s.CodexModel, s.CodexEffort
+	if id == "" {
+		id = codexDefault().ID
 	}
-	label := "Codex"
-	if model != "" {
-		label += " · " + codexModelName(model)
+	model = "Codex"
+	if id != "" {
+		model += " · " + codexModelName(id)
 	}
-	if effort != "" {
-		label += " · " + effort
+	if effort == "" {
+		effort = "default"
 	}
-	return label
+	return model, effort
 }
 
 // stopAgent ends the agent session, if any.

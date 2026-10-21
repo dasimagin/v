@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -105,8 +106,12 @@ func loadThemes(userDir string) error {
 			if err == nil {
 				var t *Theme
 				if t, err = parseVSCodeTheme(strings.TrimSuffix(filepath.Base(f), ".json"), data); err == nil {
-					byID[t.ID] = t
-					continue
+					if isLight(t.Bg) {
+						err = errors.New("light themes are not supported")
+					} else {
+						byID[t.ID] = t
+						continue
+					}
 				}
 			}
 			errs = append(errs, fmt.Errorf("theme %s: %w", filepath.Base(f), err))
@@ -201,4 +206,14 @@ func styleFor(t chroma.TokenType) lipgloss.Style {
 	}
 	styleCache[t] = s
 	return s
+}
+
+// isLight reports whether a "#rrggbb" background is light, by its perceived brightness.
+func isLight(hex string) bool {
+	v, err := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	if err != nil {
+		return false
+	}
+	r, g, b := float64(v>>16&0xff), float64(v>>8&0xff), float64(v&0xff)
+	return 0.299*r+0.587*g+0.114*b > 140
 }

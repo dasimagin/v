@@ -459,8 +459,6 @@ func (m *model) renderStatusLine() string {
 	}
 	if m.exitKey != "" {
 		left, style = " Press "+keyNames[m.exitKey]+" again to exit", hintStyle
-	} else if m.status == "" {
-		left, style = " "+m.hint(), hintStyle
 	}
 	parts := m.workspaceParts()
 	width := max(parts[0].x-1, 0)

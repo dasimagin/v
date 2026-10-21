@@ -599,53 +599,6 @@ func (m model) View() string {
 	return finish()
 }
 
-func (m model) hint() string {
-	switch {
-	case m.reviewAsking():
-		return "↑↓ choose · enter answer · tab add a note for Claude · esc skip this comment"
-	case m.rv != nil && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
-		return "the agent is working… · type a note for it · esc stops"
-	case m.runScr != nil && m.rv == nil && !m.busy && m.perm == nil && m.mode == modeChat:
-		return "type to guide the agent further · esc leaves the " + m.runScr.kind + " run"
-	case m.mode == modePick:
-		switch m.picker.kind {
-		case "workdir":
-			return "type to filter · ↑↓ select · → open folder · ← up · enter choose · esc back"
-		case "open":
-			return "type to filter · ↑↓ select · → open folder · ← up · enter open · shift+↑↓ scroll preview · esc back"
-		case "show":
-			return "search commits · ↑↓ select · shift+↑↓ scroll · esc back"
-		case "prdiff":
-			if m.picker.compose != nil {
-				return "enter sends · esc cancels"
-			}
-			return "search · click a button or a diff line · ctrl+r reply · ctrl+a apply · ctrl+n new · ctrl+e resolve · ctrl+l files/comments · ↑↓ select · esc back"
-		}
-		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
-	case m.repoMenu != nil:
-		return "↑↓ choose · enter select · type to filter · esc close"
-	case m.fileMode() && m.doc.Ed.On && m.mode == modeReview:
-		return "editing the proposal · ctrl+s accept · ctrl+z undo · esc stop editing"
-	case m.fileMode() && m.doc.Ed.On:
-		return "editing · ctrl+s save · ctrl+z undo · ctrl+t view mode · esc stop"
-	case m.perm != nil:
-		return "↑↓ choose · enter answer · tab add a note · pgup/pgdn scroll"
-	case m.busy:
-		return "working… · esc to interrupt"
-	}
-	switch m.mode {
-	case modeView:
-		return "↑↓ ←→ scroll · enter edit · tab view mode · esc back"
-	case modeChat:
-		return "/ commands · ctrl+o thinking · /reset new session"
-	case modeConfig:
-		return "↑↓ move · enter choose · esc back"
-	case modeSessions:
-		return "↑↓ select · enter resume · esc back"
-	}
-	return "ctrl+b branches · ctrl+p PR · /workdir directory · /q exit"
-}
-
 func main() {
 	dir, file, argErr := startupPaths(os.Args[1:], os.Stderr)
 	if errors.Is(argErr, flag.ErrHelp) {

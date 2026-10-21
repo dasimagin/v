@@ -75,12 +75,21 @@ func readRepository(dir string) *repository {
 			locals[name] = true
 		}
 	}
+	// A branch on several remotes (origin and upstream in a fork) is listed once, preferring origin.
+	remotes := map[string]int{}
 	for _, line := range strings.Split(refs, "\n") {
 		ref, sym, _ := strings.Cut(line, "\t")
 		if remote, ok := strings.CutPrefix(ref, "refs/remotes/"); ok && sym == "" {
-			_, name, _ := strings.Cut(remote, "/")
-			if name != "" && name != "HEAD" && !locals[name] {
-				r.Branches = append(r.Branches, gitBranch{Name: name, Ref: remote, Remote: true})
+			owner, name, _ := strings.Cut(remote, "/")
+			if name == "" || name == "HEAD" || locals[name] {
+				continue
+			}
+			b := gitBranch{Name: name, Ref: remote, Remote: true}
+			if i, seen := remotes[name]; !seen {
+				remotes[name] = len(r.Branches)
+				r.Branches = append(r.Branches, b)
+			} else if owner == "origin" {
+				r.Branches[i] = b
 			}
 		}
 	}

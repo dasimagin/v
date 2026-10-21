@@ -190,6 +190,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.key(msg)
 	case repositoryMsg, pullRequestsMsg, branchSwitchedMsg, prLinkedMsg, repositoryTickMsg:
 		return m, m.onRepository(msg)
+	case prDiffMsg:
+		m.onPRDiff(msg)
+		return m, nil
 	case agentEvent:
 		if msg.a != m.agent {
 			return m, nil // from a session that /reset closed
@@ -545,6 +548,8 @@ func (m model) hint() string {
 			return "type to filter · ↑↓ select · → open folder · ← up · enter open · shift+↑↓ scroll preview · esc back"
 		case "show":
 			return "search commits · ↑↓ select · shift+↑↓ scroll · esc back"
+		case "prdiff":
+			return "search files · ↑↓ select · shift+↑↓ scroll the diff · esc back"
 		}
 		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
 	case m.repoMenu != nil:

@@ -32,6 +32,9 @@ type workspacePicker struct {
 	loaded           bool
 	pscroll          int // preview scroll
 	pkey             string
+	pr               *prData // /pr
+	loadErr          string
+	seq              int
 }
 
 func pickerCommand(input string) (kind, query string) {
@@ -60,8 +63,8 @@ func (m *model) openPicker(kind, query string) tea.Cmd {
 // syncPicker is called after an omnibox edit, including command completion.
 func (m *model) syncPicker() bool {
 	kind, query := pickerCommand(m.omni.Value())
-	if m.mode == modePick && m.picker != nil && m.picker.kind == "show" {
-		kind, query = "show", m.omni.Value() // /show was entered; the omnibox now searches
+	if m.mode == modePick && m.picker != nil && m.picker.bare() {
+		kind, query = m.picker.kind, m.omni.Value() // the command was entered; the omnibox now searches
 	}
 	if kind == "" || m.perm != nil {
 		if m.picker != nil && m.mode == modePick {
@@ -133,6 +136,26 @@ func (m *model) rebuildPicker() {
 					}
 				}
 				p.items = append(p.items, pickItem{value: b.Ref, label: b.Ref, branch: b, score: score, current: current})
+			}
+		}
+	} else if p.kind == "prdiff" {
+		p.dir = m.workdir
+		if d := p.pr; d == nil {
+			p.err = p.loadErr
+		} else {
+			if score, ok := fuzzyScore(p.query, "conversation"); ok {
+				p.items = append(p.items, pickItem{value: "", label: "Conversation", score: score, current: true})
+			}
+			for _, f := range d.Files {
+				score, ok := fuzzyScore(p.query, f.Path)
+				if !ok {
+					continue
+				}
+				label := f.Path
+				if n := len(f.Comments); n > 0 {
+					label += fmt.Sprintf("  (%d)", n)
+				}
+				p.items = append(p.items, pickItem{value: f.Path, label: label, score: score})
 			}
 		}
 	} else if p.kind == "show" {
@@ -284,7 +307,7 @@ func (m *model) choosePicker() tea.Cmd {
 	switch p.kind {
 	case "open":
 		return m.chooseFile()
-	case "show":
+	case "show", "prdiff":
 		return nil
 	}
 	if m.repoChanging || len(p.items) == 0 || !m.canSwitchWorkspace() {
@@ -349,7 +372,7 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 		if p.cycling || d < 0 {
 			m.movePicker(d, true)
 		}
-		if p.kind == "show" {
+		if p.bare() {
 			m.movePicker(d, true)
 			return nil
 		}
@@ -386,22 +409,67 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
+// bare screens are opened by their command alone; the omnibox then only searches.
+func (p *workspacePicker) bare() bool { return p.kind == "show" || p.kind == "prdiff" }
+
+func (m *model) openBare(kind string) (*workspacePicker, tea.Cmd) {
+	m.setOmni("")
+	if m.mode != modePick {
+		m.push()
+		m.mode = modePick
+	}
+	m.picker = &workspacePicker{kind: kind}
+	m.menu, m.repoMenu, m.viewMenu = nil, nil, nil
+	m.status, m.exitKey = "", ""
+	return m.picker, m.omni.Focus()
+}
+
 // cmdShow opens the history screen; the omnibox is then its search field.
 func (m *model) cmdShow(string) tea.Cmd {
 	if m.perm != nil {
 		m.setErr("answer the agent's request before browsing history")
 		return nil
 	}
-	m.setOmni("")
-	if m.mode != modePick {
-		m.push()
-		m.mode = modePick
-	}
-	m.picker = &workspacePicker{kind: "show"}
-	m.menu, m.repoMenu, m.viewMenu = nil, nil, nil
-	m.status, m.exitKey = "", ""
+	_, focus := m.openBare("show")
 	m.rebuildPicker()
-	return m.omni.Focus()
+	return focus
+}
+
+var prSeq int
+
+// openPR reads the PR from GitHub and shows its files, diff and comments.
+func (m *model) openPR(pr pullRequest) tea.Cmd {
+	if m.perm != nil {
+		m.setErr("answer the agent's request before reading a PR")
+		return nil
+	}
+	if repo, _ := parsePRURL(pr.URL); repo == "" {
+		m.note(pr.Title + "\n" + pr.URL)
+		m.flash("only github.com PRs can be read here · " + pr.URL)
+		return nil
+	}
+	p, focus := m.openBare("prdiff")
+	prSeq++
+	p.seq, p.loadErr = prSeq, "Loading "+prLabel(pr)+"…"
+	m.rebuildPicker()
+	dir, url, seq := m.repo.Root, pr.URL, p.seq
+	return tea.Batch(focus, func() tea.Msg {
+		d, err := fetchPR(dir, url)
+		return prDiffMsg{seq, d, err}
+	})
+}
+
+func (m *model) onPRDiff(msg prDiffMsg) {
+	p := m.picker
+	if p == nil || p.kind != "prdiff" || p.seq != msg.seq {
+		return
+	}
+	if msg.err != nil {
+		p.loadErr = msg.err.Error()
+	} else {
+		p.pr = msg.data
+	}
+	m.rebuildPicker()
 }
 
 func (p *workspacePicker) browsable() bool { return p.kind == "workdir" || p.kind == "open" }
@@ -427,6 +495,11 @@ func (m *model) renderPicker(rows int) []string {
 		title = "Open file"
 	case "show":
 		title = "Branch history"
+	case "prdiff":
+		title = "Pull request"
+		if p.pr != nil {
+			title = fmt.Sprintf("PR #%d", p.pr.Number)
+		}
 	}
 	info := fmt.Sprintf("%s · %d matches", tildify(p.dir), len(p.items))
 	out := m.header(fgStyle.Bold(true).Render(title), info, "")
@@ -473,7 +546,11 @@ func (m *model) renderPicker(rows int) []string {
 
 // pickerListWidth leaves the right side to the preview when the window is wide enough.
 func (m *model) pickerListWidth() int {
-	if m.w < 100 {
+	need := 100
+	if m.picker != nil && m.picker.kind == "prdiff" {
+		need = 70 // the diff is the point of this screen
+	}
+	if m.w < need {
 		return m.w
 	}
 	return max(m.w*2/5, 40)
@@ -489,6 +566,8 @@ func (m *model) pickerPreview() previewLines {
 	switch p.kind {
 	case "switch":
 		return cachedPreview("log:"+m.workdir+":"+it.branch.Ref, previewTTL, func() previewLines { return branchPreview(m.workdir, it.branch.Ref) })
+	case "prdiff":
+		return p.prPreview(it.value, m.w-m.pickerListWidth()-2)
 	case "show":
 		return cachedPreview("commit:"+m.workdir+":"+it.value, 0, func() previewLines { return commitPreview(m.workdir, it.value) })
 	}

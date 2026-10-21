@@ -63,11 +63,11 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 		return m.linkPR(arg)
 	}
 	prs := m.repo.pullRequests()
+	if len(prs) == 1 || (len(prs) > 1 && m.repo.Link != "") {
+		return m.openPR(*m.repo.selectedPR())
+	}
 	if len(prs) <= 1 {
 		switch {
-		case len(prs) == 1:
-			m.note(prs[0].Title + "\n" + prs[0].URL)
-			m.flash(prs[0].URL)
 		case m.prLoading:
 			m.flash("looking up PRs…")
 		case m.repo.PRError != "":

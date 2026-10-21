@@ -192,3 +192,36 @@ func TestHistoryPreviews(t *testing.T) {
 		t.Error("commit preview lacks the added line")
 	}
 }
+
+func TestPRPreviewPlacesComments(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"body","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[]}`
+	diff := "diff --git a/f.go b/f.go\nindex 1..2 100644\n--- a/f.go\n+++ b/f.go\n@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more\n"
+	inline := `{"path":"f.go","line":2,"side":"RIGHT","body":"why?","created_at":"2026-01-01T00:00:00Z","user":{"login":"r"}}` + "\n"
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(diff), []byte(inline))
+	if err != nil || len(d.Files) != 1 || d.Files[0].Adds != 2 || d.Files[0].Dels != 1 {
+		t.Fatalf("parse: %+v %v", d, err)
+	}
+	var texts []string
+	for _, line := range d.filePreview(d.Files[0], 60) {
+		s := ""
+		for _, g := range line {
+			s += g.text
+		}
+		texts = append(texts, s)
+	}
+	// new line 2 is "+new": the comment must follow it, before "+more".
+	at := func(sub string) int {
+		for i, s := range texts {
+			if strings.Contains(s, sub) {
+				return i
+			}
+		}
+		return -1
+	}
+	if !(at("+new") < at("why?") && at("why?") < at("+more")) || at("+new") < 0 {
+		t.Errorf("comment misplaced: %q", texts)
+	}
+	if repo, n := parsePRURL("https://github.com/o/r/pull/7/files"); repo != "o/r" || n != 7 {
+		t.Errorf("parsePRURL = %q %d", repo, n)
+	}
+}

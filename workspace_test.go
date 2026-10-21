@@ -351,6 +351,9 @@ func TestClickingThreadButtonsAndDiffLines(t *testing.T) {
 }
 
 func TestCommentBodyIsTinted(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
 	lines := markdownOn("hello `code`", 20)
 	if len(lines) != 1 || !strings.Contains(lines[0], bgSeq(cur.Panel)) || strings.Contains(lines[0], bgSeq(cur.Bg)) {
 		t.Errorf("not tinted: %q", lines)
@@ -942,5 +945,45 @@ func TestOmniboxKeepsTheThemeBackground(t *testing.T) {
 	// And the raw field really had the problem: padding after a reset, on no background.
 	if !strings.Contains(raw, "\x1b[0m   ") {
 		t.Skip("the field no longer pads with bare spaces; the fix is harmless")
+	}
+}
+
+func TestHandMadeBackgroundsMatchTheTerminalsColorProfile(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+	for _, c := range []struct {
+		name    string
+		profile termenv.Profile
+		prefix  string
+	}{
+		{"truecolor", termenv.TrueColor, "\x1b[48;2;"},
+		{"256 colors", termenv.ANSI256, "\x1b[48;5;"},
+		{"16 colors", termenv.ANSI, "\x1b[4"},
+	} {
+		lipgloss.SetColorProfile(c.profile)
+		seq := bgSeq(cur.Bg)
+		if !strings.HasPrefix(seq, c.prefix) {
+			t.Errorf("%s: bgSeq = %q, want it to start with %q", c.name, seq, c.prefix)
+		}
+		// It is exactly what lipgloss writes for the screen's own background.
+		probe := bg.Render("x")
+		if !strings.HasPrefix(probe, seq) {
+			t.Errorf("%s: the screen background %q does not start with %q", c.name, probe, seq)
+		}
+		// So the omnibox, which is padded by hand, sits on the same color as its surroundings.
+		m := newModel()
+		m.w = 60
+		m.omni.Width = m.w - 4
+		line := onThemeBg(m.omni.View())
+		if !strings.HasPrefix(line, seq) || strings.Contains(line, "48;2;") != (c.profile == termenv.TrueColor) {
+			t.Errorf("%s: omnibox line %q", c.name, line[:min(60, len(line))])
+		}
+	}
+	lipgloss.SetColorProfile(termenv.Ascii)
+	if seq := bgSeq(cur.Bg); seq != "" {
+		t.Errorf("no color, no sequence: %q", seq)
+	}
+	if got := markdownOn("plain", 12); len(got) != 1 || ansi.StringWidth(got[0]) != 12 {
+		t.Errorf("without colors the block is still 12 wide: %q", got)
 	}
 }

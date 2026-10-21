@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -70,10 +69,26 @@ func markdownOn(text string, width int) []string {
 	return lines
 }
 
-// bgSeq is the escape sequence that sets a "#rrggbb" background.
+// bgSeqs caches the background sequences by color and color profile.
+var bgSeqs = map[string]string{}
+
+// bgSeq is the escape sequence that sets a "#rrggbb" background, in the color
+// profile of the terminal: the sequence lipgloss itself writes for the same
+// color, so the pieces we assemble by hand match the rest of the screen
+// (a terminal with 256 colors gets the nearest of them, not a 24-bit color it
+// would draw differently, or not at all).
 func bgSeq(hex string) string {
-	v, _ := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", v>>16&0xff, v>>8&0xff, v&0xff)
+	key := fmt.Sprintf("%s|%d", hex, lipgloss.ColorProfile())
+	if seq, ok := bgSeqs[key]; ok {
+		return seq
+	}
+	probe := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("x")
+	seq := ""
+	if i := strings.Index(probe, "x"); i > 0 {
+		seq = probe[:i]
+	}
+	bgSeqs[key] = seq
+	return seq
 }
 
 // mdStyle is glamour's dark style recolored with the theme.

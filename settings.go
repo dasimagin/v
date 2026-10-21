@@ -27,7 +27,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "auto", ApplyMode: "auto", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
 }
 
 // models are the choices for the agent's model, best first.

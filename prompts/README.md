@@ -8,7 +8,7 @@ The instructions v gives its agents live in this directory as plain Markdown, so
 
 | file | who reads it | when |
 | --- | --- | --- |
-| `chat.md` | the agent in the chat (Claude Code or Codex), appended to its system prompt | every session |
+| `chat.md` | the Claude Code agent in the chat, appended to its system prompt | every session |
 | `reviewer.md` | the agent of `/review make`, appended to its system prompt | a review run (and later the reviewer of the review/fix loop) |
 | `fixer.md` | the first message of the agent of `/apply`, before the list of threads | an apply run (and later the fixer of the loop) |
 

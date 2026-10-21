@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -210,5 +212,38 @@ func TestLongDescriptionsWrapInsteadOfRunningOffScreen(t *testing.T) {
 	}
 	if len(text) < 2 || !strings.Contains(strings.Join(text, " "), "restores it on exit") {
 		t.Errorf("description = %q", text)
+	}
+}
+
+func TestOldCodexSettingsAreIgnored(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".v"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"theme":"one-light","model":"claude-sonnet-5-5","effort":"low","agent":"codex","codex_model":"gpt-x","codex_effort":"high"}`
+	if err := os.WriteFile(filepath.Join(home, ".v", "settings.json"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSettings()
+	if err != nil {
+		t.Fatalf("an old settings file must still load: %v", err)
+	}
+	if s.Model != "claude-sonnet-5-5" || s.Effort != "low" || s.Iterations != 5 {
+		t.Errorf("settings = %+v", s)
+	}
+	// The saved theme is light and gone: the startup falls back to the default one.
+	if findTheme(s.Theme) != nil {
+		t.Errorf("theme %q must be gone", s.Theme)
+	}
+	for _, o := range options {
+		if o.label == "Agent" {
+			t.Error("there is no Agent option any more")
+		}
+	}
+	m := newModel()
+	m.settings = s
+	if got := m.agentLabel(); got != "Sonnet 5.5 · low" {
+		t.Errorf("label = %q", got)
 	}
 }

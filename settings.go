@@ -24,13 +24,10 @@ type Settings struct {
 	DiffBefore int `json:"diff_before"` // lines of context before each change, in every diff
 	DiffAfter  int `json:"diff_after"`  // and after it
 
-	Agent       string `json:"agent"`        // "claude" or "codex"
-	CodexModel  string `json:"codex_model"`  // "" for Codex's default
-	CodexEffort string `json:"codex_effort"` // "" for the model's default
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
 }
 
 // models are the choices for the agent's model, best first.

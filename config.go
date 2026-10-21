@@ -48,58 +48,26 @@ var options = []option{
 		},
 	},
 	{
-		label: "Agent",
-		desc:  "Who does the work; each signs in with its own subscription",
-		values: func(*model) []string {
-			return []string{"Claude Code", "Codex"}
-		},
-		get: func(m *model) int {
-			if m.settings.Agent == agentCodex {
-				return 1
-			}
-			return 0
-		},
-		set: func(m *model, i int) error {
-			m.settings.Agent = []string{"claude", agentCodex}[i]
-			return nil
-		},
-		apply: (*model).agentChanged,
-	},
-	{
 		label: "Model",
 		desc:  "The model the agent runs on",
-		values: func(m *model) []string {
-			var names []string
-			for _, x := range agentModels(m) {
-				names = append(names, x.Name)
+		values: func(*model) []string {
+			names := make([]string, len(models))
+			for i, x := range models {
+				names[i] = x.Name
 			}
 			return names
 		},
 		get: func(m *model) int {
-			cur := m.settings.Model
-			if m.settings.Agent == agentCodex {
-				cur = m.settings.CodexModel
-				if cur == "" {
-					cur = codexDefault().ID
-				}
-			}
-			for i, x := range agentModels(m) {
-				if x.ID == cur {
+			for i, x := range models {
+				if x.ID == m.settings.Model {
 					return i
 				}
 			}
 			return 0
 		},
 		set: func(m *model, i int) error {
-			list := agentModels(m)
-			if i >= len(list) {
-				return nil
-			}
-			if m.settings.Agent == agentCodex {
-				m.settings.CodexModel = list[i].ID
-				m.settings.CodexEffort = "" // efforts differ between models
-			} else {
-				m.settings.Model = list[i].ID
+			if i < len(models) {
+				m.settings.Model = models[i].ID
 			}
 			return nil
 		},
@@ -108,34 +76,18 @@ var options = []option{
 	{
 		label:  "Effort",
 		desc:   "How hard the model thinks: more is slower and uses more of your plan",
-		values: agentEfforts,
+		values: func(*model) []string { return efforts },
 		get: func(m *model) int {
-			cur := m.settings.Effort
-			if m.settings.Agent == agentCodex {
-				cur = m.settings.CodexEffort
-				if cur == "" {
-					return 0 // "default"
-				}
-			}
-			for i, e := range agentEfforts(m) {
-				if e == cur {
+			for i, e := range efforts {
+				if e == m.settings.Effort {
 					return i
 				}
 			}
 			return 0
 		},
 		set: func(m *model, i int) error {
-			list := agentEfforts(m)
-			if i >= len(list) {
-				return nil
-			}
-			if m.settings.Agent == agentCodex {
-				m.settings.CodexEffort = list[i]
-				if i == 0 {
-					m.settings.CodexEffort = "" // "default"
-				}
-			} else {
-				m.settings.Effort = list[i]
+			if i < len(efforts) {
+				m.settings.Effort = efforts[i]
 			}
 			return nil
 		},
@@ -317,46 +269,6 @@ func (m *model) refreshDiffs() {
 	for _, s := range m.stack {
 		reset(s.doc)
 	}
-}
-
-type modelChoice struct{ ID, Name string }
-
-// agentModels are the models of the chosen agent. Codex's list comes from
-// Codex itself, the first time it is needed.
-func agentModels(m *model) []modelChoice {
-	var out []modelChoice
-	if m != nil && m.settings.Agent == agentCodex {
-		list, err := loadCodexModels()
-		if err != nil {
-			m.setErr("codex: " + err.Error())
-		}
-		for _, x := range list {
-			out = append(out, modelChoice{x.ID, x.Name})
-		}
-		return out
-	}
-	for _, x := range models {
-		out = append(out, modelChoice{x.ID, x.Name})
-	}
-	return out
-}
-
-// agentEfforts are the efforts the chosen model supports. For Codex the
-// first one, "default", leaves the choice to the model.
-func agentEfforts(m *model) []string {
-	if m == nil || m.settings.Agent != agentCodex {
-		return efforts
-	}
-	id := m.settings.CodexModel
-	if id == "" {
-		id = codexDefault().ID
-	}
-	for _, x := range codexModels {
-		if x.ID == id {
-			return append([]string{"default"}, x.Efforts...)
-		}
-	}
-	return []string{"default"}
 }
 
 // configScreen is the state of /config: the focused row, the open dropdown

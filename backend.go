@@ -6,9 +6,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// backend is a coding agent v drives: Claude Code or Codex. Each runs as a
-// subprocess signed in with the user's own subscription, and reports what
-// happens as ev values.
+// backend is a coding agent v drives: Claude Code, a subprocess signed in
+// with the user's own subscription, which reports what happens as ev values.
 type backend interface {
 	Name() string
 	Prompt(text string) error

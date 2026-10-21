@@ -66,9 +66,6 @@ type (
 // cmdConverge starts the loop on this branch's PR.
 func (m *model) cmdConverge(string) tea.Cmd {
 	switch {
-	case m.settings.Agent == agentCodex:
-		m.setErr("/converge needs Claude Code: pick it as the agent in /config")
-		return nil
 	case m.rv != nil || m.runScr != nil:
 		m.setErr("a run is already open: leave it with esc first")
 		return nil

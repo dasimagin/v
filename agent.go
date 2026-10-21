@@ -217,7 +217,7 @@ func (m *model) connect() tea.Cmd {
 		tools = r.tools
 		a, err = startClaude(m.workdir, m.settings, resume, tools, r.system)
 	} else {
-		a, err = startBackend(m.workdir, m.settings, resume, nil)
+		a, err = startClaude(m.workdir, m.settings, resume, nil, "")
 	}
 	if err != nil {
 		m.resumeNext = resume != ""
@@ -226,14 +226,6 @@ func (m *model) connect() tea.Cmd {
 	}
 	m.agent, m.resumeNext, m.agentHasTools = a, false, len(tools) > 0
 	return a.wait()
-}
-
-// startBackend starts the agent named in the settings.
-func startBackend(dir string, s Settings, resume string, tools []mcpTool) (backend, error) {
-	if s.Agent == agentCodex {
-		return startCodex(dir, s, resume)
-	}
-	return startClaude(dir, s, resume, tools, "")
 }
 
 // sendQueued sends the next queued prompt once the agent is idle.
@@ -250,25 +242,16 @@ func (m *model) sendQueued() {
 	m.busy = true
 }
 
-// agentSettingsChanged applies a new model or effort from the next message.
-// Claude Code restarts on the same session for it; Codex takes them per turn.
+// agentSettingsChanged applies a new model or effort from the next message:
+// Claude Code restarts on the same session for it.
 func (m *model) agentSettingsChanged() {
-	if m.agent != nil && m.settings.Agent != agentCodex {
+	if m.agent != nil {
 		m.agentStale = true
 	}
 	m.flash(m.agentLabel() + " from the next message")
 }
 
-// agentChanged switches between Claude Code and Codex: the session ends and
-// the next prompt starts the other agent.
-func (m *model) agentChanged() {
-	m.stopAgent()
-	m.sessionID, m.resumeNext = "", false
-	m.flash(m.agentLabel() + " from the next message, in a new session")
-}
-
-// agentLabel names the agent, model and effort: "Opus 5.5 · high",
-// "Codex · GPT-6.1-Sol · high".
+// agentLabel names the model and effort: "Opus 5.5 · high".
 func (m *model) agentLabel() string {
 	model, effort := m.agentParts()
 	return model + " · " + effort
@@ -276,22 +259,7 @@ func (m *model) agentLabel() string {
 
 // agentParts are the model and effort labels, each a dropdown in the status line.
 func (m *model) agentParts() (model, effort string) {
-	s := m.settings
-	if s.Agent != agentCodex {
-		return modelName(s.Model), s.Effort
-	}
-	id, effort := s.CodexModel, s.CodexEffort
-	if id == "" {
-		id = codexDefault().ID
-	}
-	model = "Codex"
-	if id != "" {
-		model += " · " + codexModelName(id)
-	}
-	if effort == "" {
-		effort = "default"
-	}
-	return model, effort
+	return modelName(m.settings.Model), m.settings.Effort
 }
 
 // stopAgent ends the agent session, if any.

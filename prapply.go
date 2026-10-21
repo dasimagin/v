@@ -69,9 +69,6 @@ type reviewEndMsg struct{ flow *reviewFlow }
 // cmdApply hands the open review threads of this branch's PR to the chat agent.
 func (m *model) cmdApply(string) tea.Cmd {
 	switch {
-	case m.settings.Agent == agentCodex:
-		m.setErr("/apply needs Claude Code: pick it as the agent in /config")
-		return nil
 	case m.rv != nil:
 		m.setErr("a review or apply is already in progress")
 		return nil
@@ -130,9 +127,6 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 	switch {
 	case m.rv != nil:
 		m.setErr("a review or apply is already in progress")
-		return nil
-	case m.settings.Agent == agentCodex:
-		m.setErr("/apply needs Claude Code: pick it as the agent in /config")
 		return nil
 	case m.busy || m.perm != nil:
 		m.setErr("wait for the agent to finish first")

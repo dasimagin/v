@@ -297,18 +297,20 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]
 			no = newN
 			newN++
 		}
-		gutter := "     "
+		// number, a space, the bar of the lines a thread covers, a space: the
+		// bar must not touch the number or the code
+		num := "    "
 		if no > 0 {
-			gutter = fmt.Sprintf("%4d ", no)
+			num = fmt.Sprintf("%4d", no)
 		}
-		line := []seg{{gutter, chroma.Comment}}
+		bar, barTok := " ", chroma.Comment
 		if resolved, ok := covered[no]; ok && no > 0 {
-			bar := chroma.LiteralString
+			bar, barTok = "▎", chroma.LiteralString
 			if resolved {
-				bar = chroma.Comment
+				barTok = chroma.Comment
 			}
-			line = []seg{{gutter[:4], chroma.Comment}, {"▎", bar}}
 		}
+		line := []seg{{num + " ", chroma.Comment}, {bar, barTok}, {" ", chroma.Comment}}
 		if l != "" {
 			line = append(line, seg{l, tok})
 		}

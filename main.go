@@ -203,6 +203,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onPRDiff(msg)
 	case reviewEventMsg:
 		return m, m.onReviewEvent(msg)
+	case reviewAskMsg:
+		return m, m.onReviewAsk(msg)
+	case reviewShownMsg:
+		return m, m.onReviewShown(msg)
 	case reviewDoneMsg:
 		return m, m.onReviewDone(msg)
 	case reviewPostedMsg:

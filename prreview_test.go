@@ -1,82 +1,184 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestParseReview(t *testing.T) {
-	findings := `{"summary":"s","findings":[{"path":"f.go","line":2,"level":"critical","body":"b"}]}`
-	for name, out := range map[string]string{
-		"structured": `{"is_error":false,"result":"","structured_output":` + findings + `}`,
-		"fenced":     `{"is_error":false,"result":"` + "```json\\n" + strings.ReplaceAll(findings, `"`, `\"`) + "\\n```" + `"}`,
-	} {
-		res, err := parseReview([]byte(out))
-		if err != nil || len(res.Findings) != 1 || res.Findings[0].Level != "critical" || res.Summary != "s" {
-			t.Errorf("%s: %+v %v", name, res, err)
-		}
-	}
-	if _, err := parseReview([]byte(`{"is_error":true,"result":"boom"}`)); err == nil {
-		t.Error("an error result must fail")
+const testDiff = "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n tail\n"
+
+func testFlow(auto bool) *reviewFlow {
+	return &reviewFlow{
+		repo: "o/r", number: 7, auto: auto, out: make(chan tea.Msg, 16),
+		data: &prData{Number: 7, Title: "T", Author: "a", State: "OPEN", Base: "main", Head: "feat", Files: splitDiff(testDiff)},
 	}
 }
 
-func TestApplyReviewAndPayload(t *testing.T) {
-	diff := "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n tail\n"
-	d := &prData{Repo: "o/r", Number: 7, Files: splitDiff(diff)}
-	cards := d.applyReview(reviewResult{Summary: "sum", Findings: []reviewFinding{
-		{"f.go", 2, "critical", "bug here"},
-		{"f.go", 3, "recommended", "design"},
-		{"f.go", 1, "note", "optional"},
-		{"f.go", 99, "critical", "not in the diff"},
-		{"other.go", 1, "recommended", "unknown file"},
+func callTool(t *testing.T, rv *reviewFlow, name, args string) (string, error) {
+	t.Helper()
+	for _, tool := range prTools(rv) {
+		if tool.Name == name {
+			return tool.Handler(context.Background(), json.RawMessage(args))
+		}
+	}
+	t.Fatalf("no tool %s", name)
+	return "", nil
+}
+
+func TestPRDiffNumbersNewLines(t *testing.T) {
+	out, err := callTool(t, testFlow(true), "pr_diff", `{"path":"f.go"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"    1 | keep", "      |-old", "    2 |+new", "    3 | tail"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff lacks %q:\n%s", want, out)
+		}
+	}
+	if _, err := callTool(t, testFlow(true), "pr_diff", `{"path":"nope.go"}`); err == nil {
+		t.Error("an unchanged file must fail")
+	}
+	list, _ := callTool(t, testFlow(true), "pr_list", `{}`)
+	if !strings.Contains(list, "f.go  +1 -1") {
+		t.Errorf("list = %q", list)
+	}
+}
+
+func TestPRCommentAutoAndRejections(t *testing.T) {
+	rv := testFlow(true)
+	if _, err := callTool(t, rv, "pr_comment", `{"path":"f.go","line":99,"level":"critical","body":"x"}`); err == nil || !strings.Contains(err.Error(), "not in the diff") {
+		t.Errorf("a line outside the diff must be invalid: %v", err)
+	}
+	out, err := callTool(t, rv, "pr_comment", `{"path":"f.go","line":2,"level":"critical","body":"bug here"}`)
+	if err != nil || !strings.HasPrefix(out, "accepted") {
+		t.Fatalf("auto comment: %q %v", out, err)
+	}
+	if again, _ := callTool(t, rv, "pr_comment", `{"path":"f.go","line":2,"level":"critical","body":"bug here"}`); !strings.HasPrefix(again, "duplicate") {
+		t.Errorf("same comment twice: %q", again)
+	}
+	if len(rv.cards) != 1 || rv.cards[0].Body != "!! bug here" || len(rv.cards[0].Hunk) == 0 {
+		t.Errorf("cards = %+v", rv.cards)
+	}
+	payload, n := reviewPayload(rv.cards)
+	var got struct {
+		Event    string
+		Comments []struct {
+			Path string
+			Line int
+			Side string
+			Body string
+		}
+	}
+	if err := json.Unmarshal(payload, &got); err != nil || n != 1 || got.Event != "" || got.Comments[0].Side != "RIGHT" || got.Comments[0].Line != 2 {
+		t.Errorf("payload = %s %v", payload, err)
+	}
+}
+
+func TestPRCommentManualWaitsForTheUser(t *testing.T) {
+	rv := testFlow(false)
+	results := make(chan string, 2)
+	call := func(line int, body string) {
+		go func() {
+			out, _ := callTool(t, rv, "pr_comment", fmt.Sprintf(`{"path":"f.go","line":%d,"level":"recommended","body":%q}`, line, body))
+			results <- out
+		}()
+	}
+	call(2, "first")
+	ask := (<-rv.out).(reviewAskMsg)
+	select {
+	case out := <-results:
+		t.Fatalf("returned before the user answered: %q", out)
+	case <-time.After(50 * time.Millisecond):
+	}
+	ask.reply <- "n"
+	if out := <-results; !strings.HasPrefix(out, "rejected") || !strings.Contains(out, "Do not post it again") {
+		t.Errorf("rejection = %q", out)
+	}
+	call(3, "second")
+	ask = (<-rv.out).(reviewAskMsg)
+	ask.reply <- "y"
+	if out := <-results; !strings.HasPrefix(out, "accepted") {
+		t.Errorf("acceptance = %q", out)
+	}
+	threads, _ := rv.threads("rejected")
+	if !strings.Contains(threads, "[rejected]") || !strings.Contains(threads, "first") || strings.Contains(threads, "second") {
+		t.Errorf("rejected threads = %q", threads)
+	}
+	if pending, _ := rv.threads("pending"); !strings.Contains(pending, "[pending]") || !strings.Contains(pending, "second") {
+		t.Errorf("pending threads = %q", pending)
+	}
+}
+
+func TestPRCommentStopsWhenTheReviewIsDropped(t *testing.T) {
+	rv := testFlow(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan string, 1)
+	go func() { done <- rv.propose(ctx, &reviewCard{Path: "f.go", Line: 2, Body: "x"}) }()
+	<-rv.out
+	cancel()
+	if out := <-done; !strings.HasPrefix(out, "review_ended") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestMCPServer(t *testing.T) {
+	srv, err := startMCP([]mcpTool{{
+		Name: "echo", Description: "d", Schema: `{"type":"object"}`,
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) { return "got " + string(args), nil },
 	}})
-	if len(cards) != 5 || len(d.Files[0].Comments) != 3 || len(d.Notes) != 2 {
-		t.Fatalf("cards = %d, inline = %d, notes = %v", len(cards), len(d.Files[0].Comments), d.Notes)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var bodies []string
-	for _, c := range d.Files[0].Comments {
-		bodies = append(bodies, c.Body)
-	}
-	if strings.Join(bodies, "|") != "!! bug here|! design|optional" {
-		t.Errorf("bodies = %q", bodies)
-	}
-	// The card for line 2 shows the diff around it, ending on the commented line's neighbors.
-	if c := cards[0]; !c.Anchored || len(c.Hunk) == 0 || !strings.HasPrefix(c.Hunk[c.Target], "+new") {
-		t.Errorf("hunk = %q target %d", c.Hunk, c.Target)
-	}
-	for _, c := range cards[:4] {
-		c.Decision = "y"
-	}
-	cards[4].Decision = "n"
-	check := func(pending bool) {
-		payload, n := reviewPayload(d.Summary, cards, pending)
-		var got struct {
-			Event    string
-			Body     string
-			Comments []struct {
-				Path string
-				Line int
-				Side string
-			}
-		}
-		if err := json.Unmarshal(payload, &got); err != nil || n != 4 || len(got.Comments) != 3 ||
-			got.Comments[0].Side != "RIGHT" || !strings.Contains(got.Body, "sum") || !strings.Contains(got.Body, "not in the diff") ||
-			strings.Contains(got.Body, "unknown file") {
-			t.Errorf("payload = %s (%v, n=%d)", payload, err, n)
-		}
-		if pending == (got.Event != "") {
-			t.Errorf("pending=%v but event=%q", pending, got.Event)
+	defer srv.Close()
+	var cfg struct {
+		McpServers map[string]struct {
+			URL     string
+			Headers map[string]string
 		}
 	}
-	check(false)
-	check(true)
-	d.clearDrafts()
-	if len(d.Files[0].Comments) != 0 || len(d.Notes) != 0 || d.Summary != "" {
-		t.Error("clearDrafts left drafts")
+	if err := json.Unmarshal([]byte(srv.Config("v")), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	c := cfg.McpServers["v"]
+	post := func(auth, body string) (int, string) {
+		req, _ := http.NewRequest("POST", c.URL, strings.NewReader(body))
+		req.Header.Set("Authorization", auth)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, _ := post("Bearer wrong", `{"jsonrpc":"2.0","id":1,"method":"ping"}`); code != http.StatusForbidden {
+		t.Errorf("a wrong token got %d", code)
+	}
+	auth := c.Headers["Authorization"]
+	if _, body := post(auth, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}`); !strings.Contains(body, "2025-03-26") || !strings.Contains(body, "tools") {
+		t.Errorf("initialize = %s", body)
+	}
+	if code, _ := post(auth, `{"jsonrpc":"2.0","method":"notifications/initialized"}`); code != http.StatusAccepted {
+		t.Errorf("a notification got %d", code)
+	}
+	if _, body := post(auth, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); !strings.Contains(body, `"name":"echo"`) || !strings.Contains(body, "inputSchema") {
+		t.Errorf("tools/list = %s", body)
+	}
+	if _, body := post(auth, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"a":1}}}`); !strings.Contains(body, `got {\"a\":1}`) || !strings.Contains(body, `"isError":false`) {
+		t.Errorf("tools/call = %s", body)
+	}
+	if _, body := post(auth, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"missing"}}`); !strings.Contains(body, "unknown tool") {
+		t.Errorf("unknown tool = %s", body)
 	}
 }
 

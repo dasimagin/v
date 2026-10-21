@@ -464,13 +464,6 @@ func (m *model) onPRDiff(msg prDiffMsg) tea.Cmd {
 		p.pr = msg.data
 	}
 	m.rebuildPicker()
-	if p.pr == nil {
-		return nil
-	}
-	if res, ok := reviews[p.pr.URL]; ok {
-		p.pr.applyReview(res)
-		m.rebuildPicker()
-	}
 	return nil
 }
 
@@ -637,9 +630,6 @@ func (p *workspacePicker) prItems(d *prData) {
 		for ci, c := range f.Comments {
 			first, _, _ := strings.Cut(strings.TrimSpace(c.Body), "\n")
 			label := fmt.Sprintf("%s:%d  %s", filepath.Base(f.Path), c.Line, first)
-			if c.Draft {
-				label += "  · draft"
-			}
 			score, ok := fuzzyScore(p.query, f.Path+" "+c.Body)
 			if ok {
 				p.items = append(p.items, pickItem{value: fmt.Sprintf("%d:%d", fi, ci), label: label, score: score})

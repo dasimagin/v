@@ -22,7 +22,6 @@ type prComment struct {
 	At           time.Time
 	Line         int    // line in the new file (RIGHT) or the old one (LEFT); 0 if outdated
 	Side         string // "RIGHT" or "LEFT"
-	Draft        bool   // written by the reviewer here, not posted yet
 }
 
 type prReview struct {
@@ -45,8 +44,9 @@ type prData struct {
 	Files                                 []prFile
 	Reviews                               []prReview
 	Comments                              []prComment // the conversation tab
-	Summary                               string      // draft review text
-	Notes                                 []string    // drafts that do not sit on a diff line
+	Base, Head, BaseSHA, HeadSHA          string
+	Draft                                 bool
+	Labels                                []string
 	At                                    int64
 }
 
@@ -96,7 +96,7 @@ func fetchPR(dir, url string) (*prData, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		view, errs[0] = ghOutput(dir, "pr", "view", url, "--json", "number,title,body,author,state,reviews,comments")
+		view, errs[0] = ghOutput(dir, "pr", "view", url, "--json", "number,title,body,author,state,reviews,comments,baseRefName,headRefName,baseRefOid,headRefOid,isDraft,labels")
 	}()
 	go func() {
 		defer wg.Done()
@@ -117,12 +117,18 @@ func fetchPR(dir, url string) (*prData, error) {
 
 func parsePR(repo, url string, view, diff, inline []byte) (*prData, error) {
 	var v struct {
-		Number  int
-		Title   string
-		Body    string
-		State   string
-		Author  struct{ Login string }
-		Reviews []struct {
+		Number      int
+		Title       string
+		Body        string
+		State       string
+		Author      struct{ Login string }
+		BaseRefName string
+		HeadRefName string
+		BaseRefOid  string
+		HeadRefOid  string
+		IsDraft     bool
+		Labels      []struct{ Name string }
+		Reviews     []struct {
 			Author      struct{ Login string }
 			State, Body string
 			SubmittedAt time.Time
@@ -136,7 +142,11 @@ func parsePR(repo, url string, view, diff, inline []byte) (*prData, error) {
 	if err := json.Unmarshal(view, &v); err != nil {
 		return nil, err
 	}
-	d := &prData{Repo: repo, URL: url, Number: v.Number, Title: v.Title, Body: v.Body, State: v.State, Author: v.Author.Login, At: time.Now().UnixNano()}
+	d := &prData{Repo: repo, URL: url, Number: v.Number, Title: v.Title, Body: v.Body, State: v.State, Author: v.Author.Login, At: time.Now().UnixNano(),
+		Base: v.BaseRefName, Head: v.HeadRefName, BaseSHA: v.BaseRefOid, HeadSHA: v.HeadRefOid, Draft: v.IsDraft}
+	for _, l := range v.Labels {
+		d.Labels = append(d.Labels, l.Name)
+	}
 	for _, r := range v.Reviews {
 		d.Reviews = append(d.Reviews, prReview{r.Author.Login, r.State, r.Body, r.SubmittedAt})
 	}
@@ -207,11 +217,7 @@ func wrapped(text string, width int) []string {
 
 func commentLines(c prComment, width int) previewLines {
 	var out previewLines
-	if c.Draft {
-		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"draft by Claude", chroma.NameClass}, {" · not posted", chroma.Comment}})
-	} else {
-		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
-	}
+	out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
 	for _, l := range wrapped(c.Body, width-4) {
 		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}})
 	}
@@ -295,18 +301,6 @@ func (d *prData) conversationPreview(width int) previewLines {
 	}
 	for _, l := range wrapped(d.Body, width-2) {
 		out = append(out, []seg{{l, chroma.Text}})
-	}
-	if d.Summary != "" || len(d.Notes) > 0 {
-		out = append(out, nil, []seg{{"Draft review by Claude · not posted", chroma.NameClass}})
-		for _, l := range wrapped(d.Summary, width-2) {
-			out = append(out, []seg{{l, chroma.Text}})
-		}
-		for _, n := range d.Notes {
-			out = append(out, nil)
-			for _, l := range wrapped(n, width-4) {
-				out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}})
-			}
-		}
 	}
 	for _, r := range d.Reviews {
 		if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {

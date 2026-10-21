@@ -258,14 +258,9 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openViewMenu()
 		return m, nil
 	}
-	if m.rv != nil && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" {
-		switch k {
-		case "y", "n", "a":
-			return m, m.reviewAnswer(k)
-		case "esc":
-			m.reviewEsc()
-			return m, nil
-		}
+	if m.rv != nil && !m.rv.waiting() && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" && k == "esc" {
+		m.reviewEsc() // stop a running review
+		return m, nil
 	}
 	if !m.showChoices() {
 		switch k {
@@ -288,7 +283,7 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// A pending tool call: pick an answer with ↑↓ and Enter, or its letter.
 	// Tab opens the omnibox for a note that goes with the answer.
-	if m.perm != nil && m.viewMenu == nil {
+	if (m.perm != nil || m.reviewAsking()) && m.viewMenu == nil {
 		choices := m.choices()
 		move := func(d int) { m.choice = (m.choice + d + len(choices)) % len(choices) }
 		if m.noting {
@@ -575,10 +570,10 @@ func (m model) View() string {
 
 func (m model) hint() string {
 	switch {
-	case m.rv.waiting() && m.perm == nil:
-		return "accept this comment? y yes · n skip · a accept the rest · esc drop the review"
+	case m.reviewAsking():
+		return "↑↓ choose · enter answer · tab add a note for Claude · esc skip this comment"
 	case m.rv != nil && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
-		return "Claude is reviewing… · esc stops"
+		return "Claude is reviewing… · type a note for it · esc stops"
 	case m.mode == modePick:
 		switch m.picker.kind {
 		case "workdir":

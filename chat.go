@@ -127,8 +127,21 @@ func (m *model) renderLog(rows int) []string {
 			lines = append(lines, chatLine{mark, bg.Foreground(c(cur.Fg)).Bold(true).Render(truncate(msg.file, width)), bg})
 			comment := func() {
 				bar := bg.Foreground(c(cur.Accent)).Render("┃ ")
-				for _, l := range strings.Split(lipgloss.NewStyle().Width(max(width-4, 1)).Render(msg.text), "\n") {
-					lines = append(lines, chatLine{dim.Render("│ "), bar + bg.Foreground(c(cur.Fg)).Render(strings.TrimRight(l, " ")), bg})
+				mark, text := splitLevel(msg.text)
+				if mark != "" {
+					text = mark + " " + text // wrapped with its text; drawn bold below
+				}
+				for j, l := range strings.Split(lipgloss.NewStyle().Width(max(width-4, 1)).Render(text), "\n") {
+					l = strings.TrimRight(l, " ")
+					body := bg.Foreground(c(cur.Fg)).Render(l)
+					if rest, ok := strings.CutPrefix(l, mark); ok && j == 0 && mark != "" {
+						st := bg.Foreground(c(cur.Accent)).Bold(true)
+						if mark == "!!" {
+							st = bg.Foreground(c(cur.Deleted)).Bold(true)
+						}
+						body = st.Render(mark) + bg.Foreground(c(cur.Fg)).Render(rest)
+					}
+					lines = append(lines, chatLine{dim.Render("│ "), bar + body, bg})
 				}
 			}
 			if len(msg.hunk) == 0 {

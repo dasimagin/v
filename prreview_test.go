@@ -66,7 +66,7 @@ func TestPRCommentAutoAndRejections(t *testing.T) {
 	if again, _ := callTool(t, rv, "pr_comment", `{"path":"f.go","line":2,"level":"critical","body":"bug here"}`); !strings.HasPrefix(again, "duplicate") {
 		t.Errorf("same comment twice: %q", again)
 	}
-	if len(rv.cards) != 1 || rv.cards[0].Body != "!! bug here" || len(rv.cards[0].Hunk) == 0 {
+	if len(rv.cards) != 1 || rv.cards[0].Body != "**!!** bug here" || len(rv.cards[0].Hunk) == 0 {
 		t.Errorf("cards = %+v", rv.cards)
 	}
 	payload, n := reviewPayload(rv.cards)
@@ -100,13 +100,13 @@ func TestPRCommentManualWaitsForTheUser(t *testing.T) {
 		t.Fatalf("returned before the user answered: %q", out)
 	case <-time.After(50 * time.Millisecond):
 	}
-	ask.reply <- "n"
-	if out := <-results; !strings.HasPrefix(out, "rejected") || !strings.Contains(out, "Do not post it again") {
+	ask.reply <- reviewReply{key: "n", note: "too picky"}
+	if out := <-results; !strings.HasPrefix(out, "rejected") || !strings.Contains(out, "Do not post it again") || !strings.Contains(out, "too picky") {
 		t.Errorf("rejection = %q", out)
 	}
 	call(3, "second")
 	ask = (<-rv.out).(reviewAskMsg)
-	ask.reply <- "y"
+	ask.reply <- reviewReply{key: "y"}
 	if out := <-results; !strings.HasPrefix(out, "accepted") {
 		t.Errorf("acceptance = %q", out)
 	}
@@ -185,7 +185,7 @@ func TestMCPServer(t *testing.T) {
 func TestFindingCardShowsCommentUnderItsLine(t *testing.T) {
 	m := &model{w: 80, h: 30}
 	m.log = []message{{
-		kind: msgFinding, file: "f.go:2", text: "!! bug here",
+		kind: msgFinding, file: "f.go:2", text: "**!!** bug here",
 		hunk: []string{" keep", "+new", " tail"}, target: 1,
 	}}
 	var out []string
@@ -196,5 +196,51 @@ func TestFindingCardShowsCommentUnderItsLine(t *testing.T) {
 	at := func(s string) int { return strings.Index(text, s) }
 	if !(at("f.go:2") >= 0 && at("+new") > at("f.go:2") && at("bug here") > at("+new") && at("tail") > at("bug here")) {
 		t.Errorf("card layout:\n%s", text)
+	}
+}
+
+func TestNotesReachTheReviewerWithTheNextToolResult(t *testing.T) {
+	rv := testFlow(true)
+	rv.addNote("focus on error handling")
+	var list mcpTool
+	for _, tool := range rv.withNotes(prTools(rv)) {
+		if tool.Name == "pr_list" {
+			list = tool
+		}
+	}
+	out, err := list.Handler(context.Background(), json.RawMessage(`{}`))
+	if err != nil || !strings.Contains(out, "Note from the user: focus on error handling") {
+		t.Fatalf("out = %q, %v", out, err)
+	}
+	if again, _ := list.Handler(context.Background(), json.RawMessage(`{}`)); strings.Contains(again, "Note from the user") {
+		t.Error("a note must be shown once")
+	}
+}
+
+func TestReviewQuestionUsesTheChoiceMenu(t *testing.T) {
+	m := newModel()
+	m.w, m.h, m.mode = 100, 30, modeChat
+	rv := testFlow(false)
+	rv.running = true
+	m.rv = rv
+	reply := make(chan reviewReply, 1)
+	m.onReviewAsk(reviewAskMsg{rv, &reviewCard{Path: "f.go", Line: 2, Body: "x", label: "f.go:2"}, reply})
+	if !m.showChoices() || len(m.choices()) != 4 {
+		t.Fatalf("choices not shown: %v", m.choices())
+	}
+	if menu := ansi.Strip(strings.Join(m.renderChoices(), "\n")); !strings.Contains(menu, "Post this comment") || !strings.Contains(menu, "Stop the review") {
+		t.Errorf("menu = %q", menu)
+	}
+	m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	select {
+	case r := <-reply:
+		if r.key != "n" {
+			t.Errorf("reply = %+v", r)
+		}
+	default:
+		t.Fatal("the answer was not delivered")
+	}
+	if m.showChoices() {
+		t.Error("the menu must close after the answer")
 	}
 }

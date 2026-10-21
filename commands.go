@@ -111,6 +111,11 @@ func (m *model) run(input string) tea.Cmd {
 		m.mode = modeChat
 	}
 	m.log = append(m.log, message{kind: msgUser, text: input})
+	if !strings.HasPrefix(input, "/") && m.rv != nil && m.rv.running && !m.rv.dropped {
+		m.rv.addNote(input) // steers the review, not the chat agent
+		m.note("note for the reviewer · it sees it with its next tool result")
+		return nil
+	}
 	if !strings.HasPrefix(input, "/") {
 		// The reply streams into the chat, so show it.
 		if m.mode != modeChat {

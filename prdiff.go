@@ -218,8 +218,20 @@ func wrapped(text string, width int) []string {
 func commentLines(c prComment, width int) previewLines {
 	var out previewLines
 	out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
-	for _, l := range wrapped(c.Body, width-4) {
-		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}})
+	mark, body := splitLevel(c.Body)
+	if mark != "" {
+		body = mark + " " + body // wrapped with its text; drawn bold below
+	}
+	for i, l := range wrapped(body, width-4) {
+		line := []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}}
+		if rest, ok := strings.CutPrefix(l, mark); ok && i == 0 && mark != "" {
+			tok := chroma.GenericStrong
+			if mark == "!!" {
+				tok = chroma.GenericDeleted
+			}
+			line = []seg{{"  ┃ ", chroma.LiteralString}, {mark, tok}, {rest, chroma.Text}}
+		}
+		out = append(out, line)
 	}
 	return out
 }

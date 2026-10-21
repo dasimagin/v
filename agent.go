@@ -297,6 +297,9 @@ type choice struct{ key, label string }
 // choices are the answers for the pending tool call: edits under review can
 // also be edited before accepting.
 func (m *model) choices() []choice {
+	if m.perm == nil && m.reviewAsking() {
+		return []choice{{"y", "Yes, post it"}, {"n", "No, skip it"}, {"a", "Yes, and accept the rest"}, {"x", "Stop the review"}}
+	}
 	if m.mode == modeReview && m.perm.propose != nil {
 		return []choice{{"y", "Yes"}, {"e", "Edit first"}, {"n", "No"}}
 	}
@@ -305,10 +308,17 @@ func (m *model) choices() []choice {
 
 // showChoices reports whether the choice list replaces the status line.
 func (m *model) showChoices() bool {
-	return m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)
+	return (m.perm != nil && (!m.fileMode() || !m.doc.Ed.On)) || (m.perm == nil && m.reviewAsking())
 }
 
+// reviewAsking reports whether a review comment is waiting for an answer here.
+func (m *model) reviewAsking() bool { return m.rv.waiting() && m.mode == modeChat }
+
 func (m *model) choose(key, note string) {
+	if m.perm == nil {
+		m.reviewChoose(key, note)
+		return
+	}
 	switch key {
 	case "y":
 		m.answerPermission(true, note)
@@ -323,7 +333,11 @@ func (m *model) choose(key, note string) {
 // renderChoices draws the question and the answers under the omnibox.
 func (m *model) renderChoices() []string {
 	ask := bg.Foreground(lipgloss.Color(cur.Type)).Bold(true)
-	out := []string{bg.Render(" ") + ask.Render("? Allow "+m.perm.summary+"?")}
+	question := "? Post this comment to the PR?"
+	if m.perm != nil {
+		question = "? Allow " + m.perm.summary + "?"
+	}
+	out := []string{bg.Render(" ") + ask.Render(question)}
 	labelW := 0
 	for _, c := range m.choices() {
 		labelW = max(labelW, len(c.label))

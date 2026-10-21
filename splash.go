@@ -2,9 +2,7 @@ package main
 
 import (
 	"strings"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -88,15 +86,6 @@ var tips = []tip{
 	},
 }
 
-// splashTickMsg turns the tip card.
-type splashTickMsg struct{}
-
-const tipEvery = 8 * time.Second
-
-func splashTick() tea.Cmd {
-	return tea.Tick(tipEvery, func(time.Time) tea.Msg { return splashTickMsg{} })
-}
-
 // styleTipLine colors a sketch line by its first character, which is followed
 // by a space; both are dropped. A space there leaves the line plain.
 func styleTipLine(l string) string {
@@ -141,13 +130,18 @@ func renderTip(t tip, width int) []string {
 func splash(tagline string, n, width, rows int) []string {
 	logoLines := renderLogo()
 	logoW := lipgloss.Width(logoLines[0])
-	left := append([]string{}, logoLines...)
-	taglineW := min(max(lipgloss.Width(tagline), logoW), 40)
+	// A fixed width keeps the card where it is from one joke to the next.
+	const leftW = 36
+	taglineW := leftW
+	// The logo and the joke under it are centered on one axis, whatever the joke's length.
+	var left []string
+	for _, l := range logoLines {
+		left = append(left, centerIn(l, leftW))
+	}
 	left = append(left, "")
 	for _, l := range strings.Split(ansi.Wrap(tagline, taglineW, ""), "\n") {
-		left = append(left, hintStyle.Italic(true).Render(l))
+		left = append(left, centerIn(hintStyle.Italic(true).Render(strings.TrimSpace(l)), leftW))
 	}
-	leftW := max(logoW, taglineW)
 
 	const gap = 8
 	cardW := min(width-leftW-gap-4, 60)
@@ -192,4 +186,11 @@ func centered(block []string, width, rows int) []string {
 		out[i] = center(line, width)
 	}
 	return out
+}
+
+// centerIn pads a rendered line to width, centered.
+func centerIn(s string, width int) string {
+	w := lipgloss.Width(s)
+	left := max((width-w)/2, 0)
+	return bg.Render(strings.Repeat(" ", left)) + s + bg.Render(strings.Repeat(" ", max(width-left-w, 0)))
 }

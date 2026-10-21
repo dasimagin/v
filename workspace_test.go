@@ -895,19 +895,6 @@ func TestSplashShowsLogoAndATipSideBySide(t *testing.T) {
 			}
 		}
 	}
-	// The card turns on a tick, only while the start screen is up.
-	m := newModel()
-	m.mode, m.tip = modeSplash, 0
-	next, cmd := m.Update(splashTickMsg{})
-	m = next.(model)
-	if m.tip != 1 || cmd == nil {
-		t.Errorf("tick on the start screen: tip=%d cmd=%v", m.tip, cmd)
-	}
-	m.mode = modeChat
-	next, cmd = m.Update(splashTickMsg{})
-	if next.(model).tip != 1 || cmd != nil {
-		t.Error("the rotation must stop outside the start screen")
-	}
 }
 
 func TestResetChangesTheTipWithTheJoke(t *testing.T) {
@@ -916,11 +903,50 @@ func TestResetChangesTheTipWithTheJoke(t *testing.T) {
 		m.hub = &applyHub{}
 		m.tip, m.tagline = i%len(tips), i%len(taglines)
 		oldTip, oldJoke := m.tip, m.tagline
-		if cmd := m.cmdReset(""); cmd == nil {
-			t.Fatal("reset must keep the start screen turning")
-		}
+		m.cmdReset("")
 		if m.tip == oldTip || m.tagline == oldJoke || m.mode != modeSplash {
 			t.Fatalf("tip %d→%d, joke %d→%d, mode %v", oldTip, m.tip, oldJoke, m.tagline, m.mode)
 		}
+	}
+}
+
+func TestEveryJokeFitsTheStartScreen(t *testing.T) {
+	if len(taglines) < 50 {
+		t.Errorf("only %d jokes", len(taglines))
+	}
+	seen := map[string]bool{}
+	for _, j := range taglines {
+		if seen[j] {
+			t.Errorf("duplicate joke %q", j)
+		}
+		seen[j] = true
+		for _, w := range []int{130, 90, 60} {
+			rows := splash(j, 2, w, 24)
+			if len(rows) != 24 {
+				t.Fatalf("%d rows", len(rows))
+			}
+			for i, r := range rows {
+				if ansi.StringWidth(r) != w {
+					t.Fatalf("joke %q at %d columns: row %d is %d wide", j, w, i, ansi.StringWidth(r))
+				}
+			}
+		}
+	}
+	// The logo and the joke share one axis: the first joke line is centered under the logo.
+	var rows []string
+	for _, r := range splash("Short joke", 2, 130, 24) {
+		rows = append(rows, ansi.Strip(r))
+	}
+	logoMid, jokeMid := -1, -1
+	for _, r := range rows {
+		if i := strings.Index(r, "╚███╔╝"); i >= 0 {
+			logoMid = i + ansi.StringWidth("╚███╔╝")/2
+		}
+		if i := strings.Index(r, "Short joke"); i >= 0 {
+			jokeMid = i + ansi.StringWidth("Short joke")/2
+		}
+	}
+	if logoMid < 0 || jokeMid < 0 || abs(logoMid-jokeMid) > 1 {
+		t.Errorf("logo axis %d, joke axis %d", logoMid, jokeMid)
 	}
 }

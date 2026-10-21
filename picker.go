@@ -646,7 +646,7 @@ func (p *workspacePicker) prItems(d *prData) {
 			}
 			label := f.Path
 			if n := len(f.Threads); n > 0 {
-				label += fmt.Sprintf("  (%d)", n)
+				label += fmt.Sprintf(" [%d]", n)
 			}
 			p.items = append(p.items, pickItem{value: f.Path, label: label, score: score})
 		}
@@ -687,9 +687,9 @@ func (m *model) listButton() string {
 			n += len(f.Threads)
 		}
 		if p.list == "comments" {
-			label = fmt.Sprintf("Comments · %d", n)
+			label = fmt.Sprintf("Comments [%d]", n)
 		} else {
-			label = fmt.Sprintf("Files · %d", len(p.pr.Files))
+			label = fmt.Sprintf("Files [%d]", len(p.pr.Files))
 		}
 	}
 	st := buttonStyle

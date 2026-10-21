@@ -22,6 +22,7 @@ type prComment struct {
 	At           time.Time
 	Line         int    // line in the new file (RIGHT) or the old one (LEFT); 0 if outdated
 	Side         string // "RIGHT" or "LEFT"
+	Draft        bool   // written by the reviewer here, not posted yet
 }
 
 type prReview struct {
@@ -44,6 +45,8 @@ type prData struct {
 	Files                                 []prFile
 	Reviews                               []prReview
 	Comments                              []prComment // the conversation tab
+	Summary                               string      // draft review text
+	Notes                                 []string    // drafts that do not sit on a diff line
 	At                                    int64
 }
 
@@ -159,7 +162,7 @@ func parsePR(repo, url string, view, diff, inline []byte) (*prData, error) {
 		}
 		for i := range d.Files {
 			if d.Files[i].Path == c.Path {
-				d.Files[i].Comments = append(d.Files[i].Comments, prComment{c.User.Login, c.Body, c.CreatedAt, c.Line, c.Side})
+				d.Files[i].Comments = append(d.Files[i].Comments, prComment{Author: c.User.Login, Body: c.Body, At: c.CreatedAt, Line: c.Line, Side: c.Side})
 			}
 		}
 	}
@@ -204,7 +207,11 @@ func wrapped(text string, width int) []string {
 
 func commentLines(c prComment, width int) previewLines {
 	var out previewLines
-	out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
+	if c.Draft {
+		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"draft by Claude", chroma.NameClass}, {" · not posted", chroma.Comment}})
+	} else {
+		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
+	}
 	for _, l := range wrapped(c.Body, width-4) {
 		out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}})
 	}
@@ -285,6 +292,18 @@ func (d *prData) conversationPreview(width int) previewLines {
 	}
 	for _, l := range wrapped(d.Body, width-2) {
 		out = append(out, []seg{{l, chroma.Text}})
+	}
+	if d.Summary != "" || len(d.Notes) > 0 {
+		out = append(out, nil, []seg{{"Draft review by Claude · not posted", chroma.NameClass}})
+		for _, l := range wrapped(d.Summary, width-2) {
+			out = append(out, []seg{{l, chroma.Text}})
+		}
+		for _, n := range d.Notes {
+			out = append(out, nil)
+			for _, l := range wrapped(n, width-4) {
+				out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}})
+			}
+		}
 	}
 	for _, r := range d.Reviews {
 		if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {

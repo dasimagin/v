@@ -34,6 +34,10 @@ type workspacePicker struct {
 	pkey             string
 	pr               *prData // /pr
 	loadErr          string
+	busy             string // "review" or "post" while it runs
+	cancel           func()
+	confirm          bool // the next ctrl+s posts
+	autoReview       bool // start a review once the PR is loaded
 	seq              int
 }
 
@@ -95,6 +99,9 @@ func (m *model) syncPicker() bool {
 func (m *model) closePicker(clear bool) {
 	if m.mode == modePick {
 		m.pop()
+	}
+	if m.picker != nil && m.picker.cancel != nil {
+		m.picker.cancel()
 	}
 	m.picker = nil
 	if clear {
@@ -348,6 +355,10 @@ func (m *model) chooseFile() tea.Cmd {
 
 func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	p := m.picker
+	if k := msg.String(); p.confirm && k != "ctrl+s" {
+		p.confirm = false
+		m.status = ""
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closePicker(true)
@@ -378,6 +389,15 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		p.cycling = true
 		m.setOmni("/" + p.kind + " " + p.items[p.sel].value)
+		return nil
+	case "ctrl+r":
+		if p.kind == "prdiff" {
+			return m.startReview()
+		}
+	case "ctrl+s":
+		if p.kind == "prdiff" {
+			return m.postDrafts()
+		}
 		return nil
 	case "shift+up", "shift+down":
 		p.pscroll += 3 * map[string]int{"shift+up": -1, "shift+down": 1}[msg.String()]
@@ -438,7 +458,7 @@ func (m *model) cmdShow(string) tea.Cmd {
 var prSeq int
 
 // openPR reads the PR from GitHub and shows its files, diff and comments.
-func (m *model) openPR(pr pullRequest) tea.Cmd {
+func (m *model) openPR(pr pullRequest, review bool) tea.Cmd {
 	if m.perm != nil {
 		m.setErr("answer the agent's request before reading a PR")
 		return nil
@@ -450,7 +470,7 @@ func (m *model) openPR(pr pullRequest) tea.Cmd {
 	}
 	p, focus := m.openBare("prdiff")
 	prSeq++
-	p.seq, p.loadErr = prSeq, "Loading "+prLabel(pr)+"…"
+	p.seq, p.loadErr, p.autoReview = prSeq, "Loading "+prLabel(pr)+"…", review
 	m.rebuildPicker()
 	dir, url, seq := m.repo.Root, pr.URL, p.seq
 	return tea.Batch(focus, func() tea.Msg {
@@ -459,10 +479,10 @@ func (m *model) openPR(pr pullRequest) tea.Cmd {
 	})
 }
 
-func (m *model) onPRDiff(msg prDiffMsg) {
+func (m *model) onPRDiff(msg prDiffMsg) tea.Cmd {
 	p := m.picker
 	if p == nil || p.kind != "prdiff" || p.seq != msg.seq {
-		return
+		return nil
 	}
 	if msg.err != nil {
 		p.loadErr = msg.err.Error()
@@ -470,6 +490,11 @@ func (m *model) onPRDiff(msg prDiffMsg) {
 		p.pr = msg.data
 	}
 	m.rebuildPicker()
+	if p.pr != nil && p.autoReview {
+		p.autoReview = false
+		return m.startReview()
+	}
+	return nil
 }
 
 func (p *workspacePicker) browsable() bool { return p.kind == "workdir" || p.kind == "open" }
@@ -502,6 +527,12 @@ func (m *model) renderPicker(rows int) []string {
 		}
 	}
 	info := fmt.Sprintf("%s · %d matches", tildify(p.dir), len(p.items))
+	switch p.busy {
+	case "review":
+		info += " · Claude is reviewing… (esc stops)"
+	case "post":
+		info += " · posting…"
+	}
 	out := m.header(fgStyle.Bold(true).Render(title), info, "")
 	lw := m.pickerListWidth()
 	var left []string

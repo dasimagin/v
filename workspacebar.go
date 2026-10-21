@@ -40,6 +40,14 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 		m.setErr("select a Git branch to link a PR")
 		return nil
 	}
+	if arg == "review" {
+		prs := m.repo.pullRequests()
+		if len(prs) == 0 {
+			m.setErr("no PR for this branch · /pr <url> to link one")
+			return nil
+		}
+		return m.openPR(*m.repo.selectedPR(), true)
+	}
 	if arg == "auto" {
 		if m.repo.Link == "" {
 			return m.refreshRepository(true)
@@ -64,7 +72,7 @@ func (m *model) cmdPR(arg string) tea.Cmd {
 	}
 	prs := m.repo.pullRequests()
 	if len(prs) == 1 || (len(prs) > 1 && m.repo.Link != "") {
-		return m.openPR(*m.repo.selectedPR())
+		return m.openPR(*m.repo.selectedPR(), false)
 	}
 	if len(prs) <= 1 {
 		switch {

@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // option is one row on the /config screen: a value picked from a dropdown.
@@ -357,12 +359,47 @@ func agentEfforts(m *model) []string {
 	return []string{"default"}
 }
 
-// configScreen is the state of /config: the focused row and the open dropdown.
+// configScreen is the state of /config: the focused row, the open dropdown
+// and the scroll position. The omnibox is its filter: row indexes the list of
+// options that match what is typed there.
 type configScreen struct {
-	row  int
-	open bool
-	pick int // highlighted value in the open dropdown
-	orig int // value before the dropdown opened, restored on Esc
+	row, top int
+	open     bool
+	pick     int    // highlighted value in the open dropdown
+	orig     int    // value before the dropdown opened, restored on Esc
+	query    string // the filter that row and top belong to
+}
+
+// configVisible lists the options that match the filter typed in the omnibox,
+// best match first; with nothing typed, all of them in their own order.
+func (m *model) configVisible() []int {
+	q := strings.TrimSpace(m.omni.Value())
+	var all []int
+	if q == "" {
+		for i := range options {
+			all = append(all, i)
+		}
+		return all
+	}
+	type hit struct{ i, score int }
+	var hits []hit
+	for i, o := range options {
+		if score, ok := fuzzyScore(q, o.label+" "+o.desc); ok {
+			hits = append(hits, hit{i, score})
+		}
+	}
+	sort.SliceStable(hits, func(a, b int) bool { return hits[a].score > hits[b].score })
+	for _, h := range hits {
+		all = append(all, h.i)
+	}
+	return all
+}
+
+// syncConfig restarts the list at the top when the filter changed.
+func (m *model) syncConfig() {
+	if c := m.cfg; c != nil && c.query != m.omni.Value() {
+		c.query, c.row, c.top, c.open = m.omni.Value(), 0, 0, false
+	}
 }
 
 func (m *model) cmdConfig(string) tea.Cmd {
@@ -382,7 +419,17 @@ func (m *model) setTheme(t *Theme) {
 
 // configKey handles navigation on the /config screen.
 func (m *model) configKey(k string) bool {
-	c, o := m.cfg, options[m.cfg.row]
+	c := m.cfg
+	vis := m.configVisible()
+	if len(vis) == 0 {
+		if k == "esc" || k == "left" {
+			m.pop()
+			return true
+		}
+		return false
+	}
+	c.row = min(c.row, len(vis)-1)
+	o := options[vis[c.row]]
 	if c.open {
 		n := len(o.values(m))
 		switch k {
@@ -408,7 +455,11 @@ func (m *model) configKey(k string) bool {
 	case "up":
 		c.row = max(c.row-1, 0)
 	case "down":
-		c.row = min(c.row+1, len(options)-1)
+		c.row = min(c.row+1, len(vis)-1)
+	case "pgup":
+		c.row = max(c.row-8, 0)
+	case "pgdown":
+		c.row = min(c.row+8, len(vis)-1)
 	case "enter", " ", "right":
 		c.open, c.pick = true, o.get(m)
 		c.orig = c.pick
@@ -416,6 +467,148 @@ func (m *model) configKey(k string) bool {
 		m.pop()
 	default:
 		return false
+	}
+	return true
+}
+
+// cfgLine is one row of the settings list, with what a click on it means.
+type cfgLine struct {
+	text   string
+	opt    int    // index into options, or -1
+	kind   string // "blank", "value", "item", "desc", "preview", "note"
+	item   int    // for "item": the value it picks
+	x0, x1 int    // for "value": the columns of its button
+}
+
+// configLines builds the whole list for the options that match the filter.
+func (m *model) configLines() []cfgLine {
+	c := m.cfg
+	vis := m.configVisible()
+	var out []cfgLine
+	if len(vis) == 0 {
+		return []cfgLine{{opt: -1, kind: "note", text: hintStyle.Render("  Nothing matches · keep typing, or clear the filter with esc")}}
+	}
+	labelW := 0
+	for _, o := range options {
+		labelW = max(labelW, lipgloss.Width(o.label))
+	}
+	// Each option: label and value on one row, a description under it, and an
+	// empty row before the next one. The open dropdown hangs under the value as a panel.
+	const margin, gap = 4, 6
+	valueX := margin + 2 + labelW + gap
+	panel := lipgloss.NewStyle().Background(lipgloss.Color(cur.Panel))
+	for p, i := range vis {
+		o := options[i]
+		out = append(out, cfgLine{opt: i, kind: "blank"})
+		mark, st := "  ", fgStyle
+		if p == c.row {
+			mark, st = "› ", accentStyle.Bold(true)
+		}
+		value := " " + o.values(m)[o.get(m)] + " ▾ "
+		valueStyle := selStyle
+		if p == c.row && c.open {
+			valueStyle = buttonOpen
+		}
+		out = append(out, cfgLine{opt: i, kind: "value", x0: valueX, x1: valueX + lipgloss.Width(value),
+			text: blank(margin) + st.Render(mark+o.label) + blank(labelW-lipgloss.Width(o.label)+gap) + valueStyle.Render(value)})
+		if p == c.row && c.open {
+			w := 0
+			for _, v := range o.values(m) {
+				w = max(w, lipgloss.Width(v))
+			}
+			for j, v := range o.values(m) {
+				item, ist := "  "+v, panel.Foreground(lipgloss.Color(cur.Fg))
+				if j == c.pick {
+					item, ist = "› "+v, panel.Foreground(lipgloss.Color(cur.Accent)).Bold(true)
+				}
+				out = append(out, cfgLine{opt: i, kind: "item", item: j, x0: valueX, x1: valueX + w + 5,
+					text: blank(valueX) + ist.Render(" "+item+strings.Repeat(" ", w-lipgloss.Width(v)+1))})
+			}
+			continue
+		}
+		for _, l := range strings.Split(ansi.Wrap(o.desc, max(m.w-margin-4, 20), ""), "\n") { // a long description wraps
+			out = append(out, cfgLine{opt: i, kind: "desc", text: blank(margin+2) + hintStyle.Render(strings.TrimSpace(l))})
+		}
+	}
+	// The code preview shows only while picking an option that affects it.
+	if _, lines, err := highlight("preview.go", previewSrc); err == nil && c.open && options[vis[c.row]].preview {
+		out = append(out, cfgLine{opt: -1, kind: "preview"}, cfgLine{opt: -1, kind: "preview", text: bg.Render("  ") + hintStyle.Render("Preview")})
+		for n, l := range lines {
+			out = append(out, cfgLine{opt: -1, kind: "preview", text: gutterStyle.Render(fmt.Sprintf("%4d ", n+1)) + renderLine(l, 0, max(m.w-5, 1))})
+		}
+	}
+	return out
+}
+
+// configKeepVisible scrolls so that the focused option, with its open dropdown, is on screen.
+func (m *model) configKeepVisible(lines []cfgLine, rows int) {
+	c := m.cfg
+	vis := m.configVisible()
+	if len(vis) == 0 {
+		c.top = 0
+		return
+	}
+	first, last := -1, -1
+	for i, l := range lines {
+		if l.opt == vis[min(c.row, len(vis)-1)] {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first >= 0 {
+		if first < c.top {
+			c.top = max(first-1, 0) // the blank row above belongs to it
+		}
+		if last >= c.top+rows {
+			c.top = last - rows + 1
+		}
+	}
+	c.top = min(max(c.top, 0), max(len(lines)-rows, 0))
+}
+
+// configClick handles a click in the body of the settings screen: a row takes
+// the focus, its value button opens the dropdown, an entry of the open
+// dropdown picks it, and a click anywhere else closes the dropdown.
+func (m *model) configClick(x, y int) bool {
+	c := m.cfg
+	m.syncConfig()
+	lines := m.configLines()
+	idx := c.top + y - headerRows
+	if idx < 0 || idx >= len(lines) {
+		return false
+	}
+	l := lines[idx]
+	vis := m.configVisible()
+	pos := func(opt int) int {
+		for p, i := range vis {
+			if i == opt {
+				return p
+			}
+		}
+		return -1
+	}
+	if c.open {
+		cur := vis[min(c.row, len(vis)-1)]
+		if l.kind == "item" && l.opt == cur && x >= l.x0 && x < l.x1 {
+			c.pick = l.item
+			_ = options[cur].set(m, c.pick)
+			m.configKey("enter")
+			return true
+		}
+		m.configKey("esc") // anywhere else: close, keeping the old value
+		if l.kind != "value" || l.opt == cur {
+			return true
+		}
+	}
+	p := pos(l.opt)
+	if p < 0 {
+		return true
+	}
+	c.row = p
+	if l.kind == "value" && x >= l.x0 && x < l.x1 {
+		m.configKey("enter") // open it
 	}
 	return true
 }
@@ -449,59 +642,16 @@ func main() {
 
 // renderConfig draws the settings rows, the open dropdown and a code preview.
 func (m *model) renderConfig(rows int) []string {
-	c := m.cfg
-	var out []string
-	add := func(s string) { out = append(out, s) }
-	labelW := 0
-	for _, o := range options {
-		labelW = max(labelW, lipgloss.Width(o.label))
-	}
-	// Each option: label and value on one row, a description under it, and
-	// an empty row before the next one. The open dropdown hangs under the
-	// value as a panel.
-	const margin, gap = 4, 6
-	valueX := margin + 2 + labelW + gap
-	panel := lipgloss.NewStyle().Background(lipgloss.Color(cur.Panel))
-	for i, o := range options {
-		add("")
-		mark, st := "  ", fgStyle
-		if i == c.row {
-			mark, st = "› ", accentStyle.Bold(true)
-		}
-		value := " " + o.values(m)[o.get(m)] + " ▾ "
-		valueStyle := selStyle
-		if i == c.row && c.open {
-			valueStyle = buttonOpen
-		}
-		add(blank(margin) + st.Render(mark+o.label) + blank(labelW-lipgloss.Width(o.label)+gap) + valueStyle.Render(value))
-		if i == c.row && c.open {
-			w := 0
-			for _, v := range o.values(m) {
-				w = max(w, lipgloss.Width(v))
-			}
-			for j, v := range o.values(m) {
-				item, ist := "  "+v, panel.Foreground(lipgloss.Color(cur.Fg))
-				if j == c.pick {
-					item, ist = "› "+v, panel.Foreground(lipgloss.Color(cur.Accent)).Bold(true)
-				}
-				add(blank(valueX) + ist.Render(" "+item+strings.Repeat(" ", w-lipgloss.Width(v)+1)))
-			}
-			continue
-		}
-		add(blank(margin+2) + hintStyle.Render(o.desc))
-	}
-	// The code preview shows only while picking an option that affects it.
-	if _, lines, err := highlight("preview.go", previewSrc); err == nil && c.open && options[c.row].preview {
-		add("")
-		add(bg.Render("  ") + hintStyle.Render("Preview"))
-		for n, l := range lines {
-			add(gutterStyle.Render(fmt.Sprintf("%4d ", n+1)) + renderLine(l, 0, max(m.w-5, 1)))
-		}
+	m.syncConfig()
+	lines := m.configLines()
+	m.configKeepVisible(lines, rows)
+	out := make([]string, 0, rows)
+	for i := m.cfg.top; i < len(lines) && len(out) < rows; i++ {
+		out = append(out, lines[i].text)
 	}
 	for len(out) < rows {
-		add("")
+		out = append(out, "")
 	}
-	out = out[:rows]
 	for i, l := range out {
 		out[i] = l + bg.Render(strings.Repeat(" ", max(m.w-lipgloss.Width(l), 0)))
 	}

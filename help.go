@@ -36,7 +36,7 @@ func (m *model) helpFor() (string, []helpRow) {
 			{"ctrl+s", "save"}, {"esc", "back"},
 		}, global...)
 	case m.mode == modeConfig:
-		return "Settings", append([]helpRow{{"↑ ↓", "move"}, {"enter  →", "open a dropdown, enter picks"}, {"esc  ←", "back"}}, global...)
+		return "Settings", append([]helpRow{{"type", "filter the settings (fuzzy); esc clears the filter"}, {"↑ ↓  pgup pgdn", "move"}, {"enter  →", "open a dropdown, enter picks"}, {"click", "a row to focus it, its value to open the dropdown, an entry to pick it"}, {"esc  ←", "close a dropdown, then go back"}}, global...)
 	case m.mode == modeSessions:
 		return "Sessions", append([]helpRow{{"↑ ↓", "move"}, {"enter", "continue the session"}, {"esc", "back"}}, global...)
 	case m.runScr != nil:

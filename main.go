@@ -164,6 +164,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if handled, cmd := m.workspaceClick(msg.X, msg.Y); handled {
 				return m, cmd
 			}
+			if m.mode == modeConfig && m.cfg != nil && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() {
+				if m.configClick(msg.X, msg.Y) {
+					return m, nil
+				}
+			}
 			if m.mode == modePick && m.picker.kind == "prdiff" && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() && msg.X > m.pickerListWidth() {
 				return m, m.previewClick(msg.X, msg.Y)
 			}
@@ -308,6 +313,24 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k == "ctrl+t" {
 		m.openViewMenu()
 		return m, nil
+	}
+	if m.mode == modeConfig && m.cfg != nil && m.perm == nil {
+		nav := k == "up" || k == "down" || k == "enter" || k == "esc" || k == "pgup" || k == "pgdown"
+		switch {
+		case m.cfg.open: // a dropdown is open: only its keys count, typing does not filter
+			if nav || k == "left" || k == " " {
+				m.configKey(k)
+			}
+			return m, nil
+		case m.omni.Value() != "" && nav: // the omnibox is the filter; these keys still drive the list
+			if k == "esc" {
+				m.omni.SetValue("") // first clear the filter
+				m.syncConfig()
+			} else {
+				m.configKey(k)
+			}
+			return m, nil
+		}
 	}
 	if m.rv != nil && !m.rv.waiting() && m.perm == nil && m.mode == modeChat && m.omni.Value() == "" && k == "esc" {
 		m.reviewEsc() // stop a running review or apply

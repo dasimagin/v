@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -14,14 +13,15 @@ import (
 	"time"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
 type prComment struct {
+	ID           int64 // REST id, for replying
 	Author, Body string
 	At           time.Time
-	Line         int    // line in the new file (RIGHT) or the old one (LEFT); 0 if outdated
-	Side         string // "RIGHT" or "LEFT"
+	Pending      bool // part of a review that is not submitted yet
 }
 
 type prReview struct {
@@ -30,10 +30,19 @@ type prReview struct {
 }
 
 type prFile struct {
-	Path     string
-	Patch    []string
-	Adds     int
-	Dels     int
+	Path    string
+	Patch   []string
+	Adds    int
+	Dels    int
+	Threads []prThread
+}
+
+// prThread is a conversation on one line of a file.
+type prThread struct {
+	ID       string // GraphQL node id, for replying
+	Resolved bool
+	Outdated bool
+	Line     int // in the new file; 0 when the line is gone
 	Comments []prComment
 }
 
@@ -90,7 +99,7 @@ func fetchPR(dir, url string) (*prData, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("reading a PR needs a github.com pull request link")
 	}
-	var view, diff, inline []byte
+	var view, diff, threads []byte
 	var errs [3]error
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -104,7 +113,8 @@ func fetchPR(dir, url string) (*prData, error) {
 	}()
 	go func() {
 		defer wg.Done()
-		inline, errs[2] = ghOutput(dir, "api", "--paginate", "--jq", ".[]", fmt.Sprintf("repos/%s/pulls/%d/comments", repo, n))
+		owner, name, _ := strings.Cut(repo, "/")
+		threads, errs[2] = ghGraphQL(dir, threadsQuery, map[string]any{"owner": owner, "name": name, "n": n})
 	}()
 	wg.Wait()
 	for _, err := range errs {
@@ -112,10 +122,10 @@ func fetchPR(dir, url string) (*prData, error) {
 			return nil, err
 		}
 	}
-	return parsePR(repo, url, view, diff, inline)
+	return parsePR(repo, url, view, diff, threads)
 }
 
-func parsePR(repo, url string, view, diff, inline []byte) (*prData, error) {
+func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 	var v struct {
 		Number      int
 		Title       string
@@ -154,29 +164,50 @@ func parsePR(repo, url string, view, diff, inline []byte) (*prData, error) {
 		d.Comments = append(d.Comments, prComment{Author: c.Author.Login, Body: c.Body, At: c.CreatedAt})
 	}
 	d.Files = splitDiff(string(diff))
-	dec := json.NewDecoder(bytes.NewReader(inline))
-	for {
-		var c struct {
-			Path         string
-			Line         int
-			OriginalLine int `json:"original_line"`
-			Side         string
-			Body         string
-			CreatedAt    time.Time `json:"created_at"`
-			User         struct{ Login string }
+	var res struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct{ Nodes []threadNode }
+				}
+			}
 		}
-		if err := dec.Decode(&c); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, err
+	}
+	if err := json.Unmarshal(threads, &res); err != nil {
+		return nil, err
+	}
+	for _, t := range res.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		th := prThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Line: t.Line}
+		for _, c := range t.Comments.Nodes {
+			th.Comments = append(th.Comments, prComment{ID: c.DatabaseID, Author: c.Author.Login, Body: c.Body, At: c.CreatedAt, Pending: c.State == "PENDING"})
 		}
 		for i := range d.Files {
-			if d.Files[i].Path == c.Path {
-				d.Files[i].Comments = append(d.Files[i].Comments, prComment{Author: c.User.Login, Body: c.Body, At: c.CreatedAt, Line: c.Line, Side: c.Side})
+			if d.Files[i].Path == t.Path {
+				d.Files[i].Threads = append(d.Files[i].Threads, th)
 			}
 		}
 	}
 	return d, nil
+}
+
+// threadsQuery reads the review threads of a PR: their state and every comment.
+const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:50){nodes{databaseId author{login} body createdAt state}}}}}}}`
+
+type threadNode struct {
+	ID         string
+	IsResolved bool
+	IsOutdated bool
+	Path       string
+	Line       int
+	Comments   struct {
+		Nodes []struct {
+			DatabaseID int64
+			Author     struct{ Login string }
+			Body       string
+			CreatedAt  time.Time
+			State      string
+		}
+	}
 }
 
 // splitDiff cuts a unified diff into one entry per file.
@@ -215,88 +246,63 @@ func wrapped(text string, width int) []string {
 	return strings.Split(ansi.Wrap(text, max(width, 10), ""), "\n")
 }
 
-func commentLines(c prComment, width int) previewLines {
-	var out previewLines
-	out = append(out, []seg{{"  ┃ ", chroma.LiteralString}, {"@" + c.Author, chroma.NameClass}, {" · " + ago(c.At), chroma.Comment}})
-	mark, body := splitLevel(c.Body)
-	if mark != "" {
-		body = mark + " " + body // wrapped with its text; drawn bold below
-	}
-	for i, l := range wrapped(body, width-4) {
-		line := []seg{{"  ┃ ", chroma.LiteralString}, {l, chroma.Text}}
-		if rest, ok := strings.CutPrefix(l, mark); ok && i == 0 && mark != "" {
-			tok := chroma.GenericStrong
-			if mark == "!!" {
-				tok = chroma.GenericDeleted
-			}
-			line = []seg{{"  ┃ ", chroma.LiteralString}, {mark, tok}, {rest, chroma.Text}}
-		}
-		out = append(out, line)
-	}
-	return out
-}
-
-// filePreview is the file's patch with its review comments under the lines they belong to.
+// filePreview is the file's patch, with a gutter of new-file line numbers and
+// each review thread under the line it belongs to. anchors holds the row of
+// every thread, by its index in f.Threads.
 func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
-	byLine := map[string][]int{}
+	byLine := map[int][]int{}
 	var loose []int
-	for i, c := range f.Comments {
-		if c.Line == 0 {
+	for i, t := range f.Threads {
+		if t.Line == 0 {
 			loose = append(loose, i)
 			continue
 		}
-		byLine[c.Side+strconv.Itoa(c.Line)] = append(byLine[c.Side+strconv.Itoa(c.Line)], i)
+		byLine[t.Line] = append(byLine[t.Line], i)
 	}
-	anchors := make([]int, len(f.Comments))
+	anchors := make([]int, len(f.Threads))
 	var out previewLines
-	oldN, newN := 0, 0
+	newN := 0
 	patch := false
-	pin := func(kind byte, no int) bool {
-		side := "RIGHT"
-		if kind == 'L' {
-			side = "LEFT"
-		}
-		return len(byLine[side+strconv.Itoa(no)]) > 0
-	}
+	pin := func(kind byte, no int) bool { return kind == 'R' && len(byLine[no]) > 0 }
 	for _, l := range reflowPatch(f.Patch, diffBefore, diffAfter, pin) {
 		tok := chroma.Text
-		key := ""
+		no := 0
 		switch {
 		case strings.HasPrefix(l, "diff --git"):
 			tok = chroma.GenericHeading
 		case hunkPattern.MatchString(l):
-			m := hunkPattern.FindStringSubmatch(l)
-			oldN, _ = strconv.Atoi(m[1])
-			newN, _ = strconv.Atoi(m[2])
+			newN, _ = strconv.Atoi(hunkPattern.FindStringSubmatch(l)[2])
 			patch, tok = true, chroma.GenericSubheading
 		case !patch:
 			tok = chroma.Comment // index, ---, +++
 		case strings.HasPrefix(l, "+"):
-			tok, key = chroma.GenericInserted, "RIGHT"+strconv.Itoa(newN)
+			tok, no = chroma.GenericInserted, newN
 			newN++
 		case strings.HasPrefix(l, "-"):
-			tok, key = chroma.GenericDeleted, "LEFT"+strconv.Itoa(oldN)
-			oldN++
+			tok = chroma.GenericDeleted
 		default:
-			key = "RIGHT" + strconv.Itoa(newN)
-			oldN++
+			no = newN
 			newN++
 		}
-		var segs []seg
-		if l != "" {
-			segs = []seg{{l, tok}}
+		gutter := "     "
+		if no > 0 {
+			gutter = fmt.Sprintf("%4d ", no)
 		}
-		out = append(out, segs)
-		for _, i := range byLine[key] {
+		line := []seg{{gutter, chroma.Comment}}
+		if l != "" {
+			line = append(line, seg{l, tok})
+		}
+		out = append(out, line)
+		for _, i := range byLine[no] {
 			anchors[i] = len(out)
-			out = append(out, commentLines(f.Comments[i], width)...)
+			out = append(out, threadBox(f.Threads[i], width)...)
 		}
 	}
 	if len(loose) > 0 {
-		out = append(out, nil, []seg{{"Outdated comments", chroma.Comment}})
+		out = append(out, nil, []seg{{"Outdated", chroma.Comment}})
 		for _, i := range loose {
 			anchors[i] = len(out)
-			out = append(out, commentLines(f.Comments[i], width)...)
+			out = append(out, threadBox(f.Threads[i], width)...)
 		}
 	}
 	return out, anchors
@@ -305,27 +311,36 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
 // conversationPreview is the PR itself: description, reviews and general comments.
 func (d *prData) conversationPreview(width int) previewLines {
 	state := strings.ToLower(d.State)
+	if d.Draft {
+		state += ", draft"
+	}
 	out := previewLines{
-		{{d.Title, chroma.GenericHeading}},
-		{{fmt.Sprintf("#%d by @%s · %s · %d files", d.Number, d.Author, state, len(d.Files)), chroma.Comment}},
-		{{d.URL, chroma.Comment}},
+		rawLine(bg.Render("  ") + fgStyle.Bold(true).Render(d.Title)),
+		rawLine(bg.Render("  ") + hintStyle.Render(fmt.Sprintf("#%d by @%s · %s · %s ← %s · %d files", d.Number, d.Author, state, d.Base, d.Head, len(d.Files)))),
+		rawLine(bg.Render("  ") + hintStyle.Render(d.URL)),
 		nil,
 	}
-	for _, l := range wrapped(d.Body, width-2) {
-		out = append(out, []seg{{l, chroma.Text}})
+	for _, l := range markdownBody(d.Body, width-2) {
+		out = append(out, rawLine(bg.Render("  ")+l))
 	}
 	for _, r := range d.Reviews {
 		if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {
 			continue // its inline comments are shown with the files
 		}
-		out = append(out, nil, []seg{{"@" + r.Author, chroma.NameClass}, {" " + strings.ToLower(strings.ReplaceAll(r.State, "_", " ")) + " · " + ago(r.At), chroma.Comment}})
-		for _, l := range wrapped(r.Body, width-4) {
-			out = append(out, []seg{{"  " + l, chroma.Text}})
+		color := hintStyle
+		switch r.State {
+		case "APPROVED":
+			color = bg.Foreground(lipgloss.Color(cur.Added))
+		case "CHANGES_REQUESTED":
+			color = bg.Foreground(lipgloss.Color(cur.Deleted))
 		}
+		label := strings.ToLower(strings.ReplaceAll(r.State, "_", " "))
+		out = append(out, nil)
+		out = append(out, messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width)...)
 	}
 	for _, c := range d.Comments {
 		out = append(out, nil)
-		out = append(out, commentLines(c, width)...)
+		out = append(out, messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width)...)
 	}
 	return out
 }

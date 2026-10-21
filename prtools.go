@@ -156,7 +156,7 @@ func prTools(rv *reviewFlow) []mcpTool {
 				var lines []string
 				for _, f := range rv.data.Files {
 					if a.Filter == "" || strings.Contains(f.Path, a.Filter) {
-						lines = append(lines, fmt.Sprintf("%s  +%d -%d  %d comments", f.Path, f.Adds, f.Dels, len(f.Comments)))
+						lines = append(lines, fmt.Sprintf("%s  +%d -%d  %d threads", f.Path, f.Adds, f.Dels, len(f.Threads)))
 					}
 				}
 				if len(lines) == 0 {
@@ -299,22 +299,6 @@ func prTools(rv *reviewFlow) []mcpTool {
 				return rv.propose(ctx, c), nil
 			},
 		},
-	}
-}
-
-type threadNode struct {
-	ID         string
-	IsResolved bool
-	IsOutdated bool
-	Path       string
-	Line       int
-	Comments   struct {
-		Nodes []struct {
-			Author    struct{ Login string }
-			Body      string
-			CreatedAt time.Time
-			State     string
-		}
 	}
 }
 

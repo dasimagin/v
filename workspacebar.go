@@ -291,6 +291,17 @@ func (m *model) repoMenuTop() int {
 
 func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 	if y == toolbarRow {
+		if m.mode == modePick && m.picker != nil && m.picker.kind == "prdiff" {
+			right := m.w - lipgloss.Width(m.modeLabel()) - 2 // the gap before the view-mode button
+			if x < right && x >= right-lipgloss.Width(m.listButton()) {
+				if m.repoMenu != nil && m.repoMenu.kind == "list" {
+					m.repoMenu = nil
+				} else {
+					m.openListMenu()
+				}
+				return true, nil
+			}
+		}
 		if x >= m.w-lipgloss.Width(m.modeLabel())-1 {
 			if m.viewMenu != nil {
 				m.viewMenu = nil

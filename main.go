@@ -152,15 +152,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			if m.mode == modePick && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() && msg.X < m.pickerListWidth() {
-				first := headerRows
-				if m.picker.kind == "prdiff" {
-					if msg.Y == headerRows {
-						m.openListMenu()
-						return m, nil
-					}
-					first++
-				}
-				if i := m.picker.top + msg.Y - first; i < len(m.picker.items) {
+				if i := m.picker.top + msg.Y - headerRows; i < len(m.picker.items) {
 					m.picker.sel = i
 					return m, m.choosePicker()
 				}
@@ -201,6 +193,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onRepository(msg)
 	case prDiffMsg:
 		return m, m.onPRDiff(msg)
+	case prComposedMsg:
+		return m, m.onPRComposed(msg)
 	case reviewEventMsg:
 		return m, m.onReviewEvent(msg)
 	case reviewAskMsg:
@@ -543,6 +537,9 @@ func (m model) View() string {
 	// Omnibox between two lines, like Claude Code's input; footer below.
 	sep := sepStyle.Render(strings.Repeat("─", m.w))
 	line(sep)
+	if m.mode == modePick && m.picker != nil && m.picker.compose != nil {
+		m.omni.Placeholder = m.picker.compose.hint
+	}
 	if m.showChoices() {
 		m.omni.Placeholder = "tab adds a note for the agent"
 		if m.noting {
@@ -583,7 +580,10 @@ func (m model) hint() string {
 		case "show":
 			return "search commits · ↑↓ select · shift+↑↓ scroll · esc back"
 		case "prdiff":
-			return "search · ↑↓ select · shift+↑↓ scroll · ctrl+l files/comments · esc back"
+			if m.picker.compose != nil {
+				return "enter sends · esc cancels"
+			}
+			return "search · ctrl+r reply · ctrl+n new comment · ctrl+l files/comments · ↑↓ select · esc back"
 		}
 		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
 	case m.repoMenu != nil:

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/alecthomas/chroma/v2"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestGithubRepository(t *testing.T) {
@@ -196,8 +198,10 @@ func TestHistoryPreviews(t *testing.T) {
 func TestPRPreviewPlacesComments(t *testing.T) {
 	view := `{"number":7,"title":"T","body":"body","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[]}`
 	diff := "diff --git a/f.go b/f.go\nindex 1..2 100644\n--- a/f.go\n+++ b/f.go\n@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more\n"
-	inline := `{"path":"f.go","line":2,"side":"RIGHT","body":"why?","created_at":"2026-01-01T00:00:00Z","user":{"login":"r"}}` + "\n"
-	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(diff), []byte(inline))
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":2,"comments":{"nodes":[` +
+		`{"databaseId":9,"author":{"login":"r"},"body":"why?","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"},` +
+		`{"databaseId":10,"author":{"login":"a"},"body":"because","createdAt":"2026-01-02T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(diff), []byte(threads))
 	if err != nil || len(d.Files) != 1 || d.Files[0].Adds != 2 || d.Files[0].Dels != 1 {
 		t.Fatalf("parse: %+v %v", d, err)
 	}
@@ -208,7 +212,7 @@ func TestPRPreviewPlacesComments(t *testing.T) {
 		for _, g := range line {
 			s += g.text
 		}
-		texts = append(texts, s)
+		texts = append(texts, ansi.Strip(s))
 	}
 	// new line 2 is "+new": the comment must follow it, before "+more".
 	at := func(sub string) int {
@@ -219,10 +223,59 @@ func TestPRPreviewPlacesComments(t *testing.T) {
 		}
 		return -1
 	}
-	if !(at("+new") < at("why?") && at("why?") < at("+more")) || at("+new") < 0 {
+	if !(at("+new") < at("why?") && at("why?") < at("because") && at("because") < at("+more")) || at("+new") < 0 {
 		t.Errorf("comment misplaced: %q", texts)
+	}
+	if th := d.Files[0].Threads; len(th) != 1 || th[0].ID != "T1" || len(th[0].Comments) != 2 || th[0].Comments[0].ID != 9 {
+		t.Errorf("threads = %+v", th)
 	}
 	if repo, n := parsePRURL("https://github.com/o/r/pull/7/files"); repo != "o/r" || n != 7 {
 		t.Errorf("parsePRURL = %q %d", repo, n)
+	}
+}
+
+func TestComposeOnThePRScreen(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[],"headRefOid":"abc"}`
+	diff := "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n"
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":2,"comments":{"nodes":[` +
+		`{"databaseId":9,"author":{"login":"r"},"body":"why?","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(diff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel()
+	m.w, m.h, m.mode = 120, 30, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	m.picker.sel = 1 // the Conversation entry comes first, then the files
+	// On a file: a reply needs a thread, a new comment is on the file.
+	if cmd := m.startCompose("reply"); cmd != nil || m.picker.compose != nil {
+		t.Error("a reply must not start on a file item")
+	}
+	m.startCompose("new")
+	if c := m.picker.compose; c == nil || c.kind != "line" || c.file.Path != "f.go" {
+		t.Fatalf("compose = %+v", m.picker.compose)
+	}
+	// A line outside the diff is refused before anything is sent.
+	m.omni.SetValue("99 nope")
+	if cmd := m.sendCompose(); cmd != nil || m.picker.compose == nil {
+		t.Error("a line outside the diff must not be sent")
+	}
+	m.omni.SetValue("no number")
+	if cmd := m.sendCompose(); cmd != nil {
+		t.Error("a missing line number must not be sent")
+	}
+	m.composeKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.picker.compose != nil {
+		t.Error("esc must cancel")
+	}
+	// In the comments list a reply targets the thread.
+	m.picker.list = "comments"
+	m.rebuildPicker()
+	m.picker.sel = 1 // Conversation comes first
+	m.startCompose("reply")
+	if c := m.picker.compose; c == nil || c.kind != "reply" || c.thread.ID != "T1" || !strings.Contains(c.hint, "@r") {
+		t.Fatalf("reply compose = %+v", m.picker.compose)
 	}
 }

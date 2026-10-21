@@ -126,23 +126,29 @@ func (m *model) renderLog(rows int) []string {
 			}
 			lines = append(lines, chatLine{mark, bg.Foreground(c(cur.Fg)).Bold(true).Render(truncate(msg.file, width)), bg})
 			comment := func() {
-				bar := bg.Foreground(c(cur.Accent)).Render("┃ ")
+				frame := bg.Foreground(c(cur.Accent))
+				who := "Claude"
+				if msg.file != "" && strings.HasPrefix(msg.file, "reply") {
+					who = "Claude · reply"
+				}
+				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╭─ ") + frame.Bold(true).Render(who), bg})
 				mark, text := splitLevel(msg.text)
+				body := markdownBody(text, width-6)
 				if mark != "" {
-					text = mark + " " + text // wrapped with its text; drawn bold below
-				}
-				for j, l := range strings.Split(lipgloss.NewStyle().Width(max(width-4, 1)).Render(text), "\n") {
-					l = strings.TrimRight(l, " ")
-					body := bg.Foreground(c(cur.Fg)).Render(l)
-					if rest, ok := strings.CutPrefix(l, mark); ok && j == 0 && mark != "" {
-						st := bg.Foreground(c(cur.Accent)).Bold(true)
-						if mark == "!!" {
-							st = bg.Foreground(c(cur.Deleted)).Bold(true)
-						}
-						body = st.Render(mark) + bg.Foreground(c(cur.Fg)).Render(rest)
+					st := frame.Bold(true)
+					if mark == "!!" {
+						st = bg.Foreground(c(cur.Deleted)).Bold(true)
 					}
-					lines = append(lines, chatLine{dim.Render("│ "), bar + body, bg})
+					if len(body) > 0 {
+						body[0] = st.Render(mark) + bg.Render(" ") + body[0]
+					} else {
+						body = []string{st.Render(mark)}
+					}
 				}
+				for _, l := range body {
+					lines = append(lines, chatLine{dim.Render("│ "), frame.Render("│ ") + l, bg})
+				}
+				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╰─"), bg})
 			}
 			if len(msg.hunk) == 0 {
 				comment() // not on a diff line

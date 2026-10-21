@@ -10,12 +10,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type pickItem struct {
 	value, label string
 	branch       gitBranch
 	dir, current bool
+	resolved     bool // a PR thread that is closed
 	score        int
 }
 
@@ -36,6 +38,7 @@ type workspacePicker struct {
 	loadErr          string
 	list             string // "files" or "comments" on the left
 	focus            int    // row of the preview to bring into view
+	compose          *composeState
 	seq              int
 }
 
@@ -287,7 +290,7 @@ func (m *model) movePicker(delta int, wrap bool) {
 	} else {
 		p.sel = min(max(p.sel+delta, 0), n-1)
 	}
-	rows := m.pickerRows()
+	rows := m.bodyRows()
 	p.top = min(max(p.top, p.sel-rows+1), p.sel)
 }
 
@@ -337,6 +340,17 @@ func (m *model) chooseFile() tea.Cmd {
 
 func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	p := m.picker
+	if p.kind == "prdiff" {
+		if p.compose != nil {
+			return m.composeKey(msg)
+		}
+		switch msg.String() {
+		case "ctrl+r":
+			return m.startCompose("reply")
+		case "ctrl+n":
+			return m.startCompose("new")
+		}
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closePicker(true)
@@ -497,12 +511,12 @@ func (m *model) renderPicker(rows int) []string {
 		}
 	}
 	info := fmt.Sprintf("%s · %d matches", tildify(p.dir), len(p.items))
+	if p.compose != nil {
+		info = "writing a comment"
+	}
 	out := m.header(fgStyle.Bold(true).Render(title), info, "")
 	lw := m.pickerListWidth()
 	var left []string
-	if p.kind == "prdiff" {
-		left = append(left, m.listSwitcher(lw))
-	}
 	if len(p.items) == 0 {
 		note := "No matches · keep typing or edit the query"
 		if p.err != "" {
@@ -518,7 +532,7 @@ func (m *model) renderPicker(rows int) []string {
 			st = bg.Foreground(lipgloss.Color(cur.Accent2))
 		case it.dir:
 			st = accentStyle
-		case it.branch.Remote:
+		case it.branch.Remote, it.resolved:
 			st = hintStyle
 		case strings.HasPrefix(it.label, "."):
 			st = hintStyle
@@ -588,20 +602,17 @@ func (m *model) previewPane(width, rows int) []string {
 	out := make([]string, rows)
 	for i := range out {
 		if n := p.pscroll + i; n < len(lines) {
-			out[i] = bg.Render(" ") + renderLine(lines[n], 0, width-1)
+			if raw := lines[n]; len(raw) == 1 && raw[0].tok == tokRaw {
+				text := ansi.Truncate(raw[0].text, width-1, "")
+				out[i] = text + blank(width-lipgloss.Width(text))
+			} else {
+				out[i] = bg.Render(" ") + renderLine(raw, 0, width-1)
+			}
 		} else {
 			out[i] = blank(width)
 		}
 	}
 	return out
-}
-
-// pickerRows is how many list rows fit; the PR screens keep one for the list switcher.
-func (m *model) pickerRows() int {
-	if m.picker != nil && m.picker.kind == "prdiff" {
-		return m.bodyRows() - 1
-	}
-	return m.bodyRows()
 }
 
 // prItems fills the left list of a PR screen: files, or comments.
@@ -616,7 +627,7 @@ func (p *workspacePicker) prItems(d *prData) {
 				continue
 			}
 			label := f.Path
-			if n := len(f.Comments); n > 0 {
+			if n := len(f.Threads); n > 0 {
 				label += fmt.Sprintf("  (%d)", n)
 			}
 			p.items = append(p.items, pickItem{value: f.Path, label: label, score: score})
@@ -627,12 +638,18 @@ func (p *workspacePicker) prItems(d *prData) {
 		p.items = append(p.items, pickItem{value: "", label: "Conversation", score: score, current: true})
 	}
 	for fi, f := range d.Files {
-		for ci, c := range f.Comments {
-			first, _, _ := strings.Cut(strings.TrimSpace(c.Body), "\n")
-			label := fmt.Sprintf("%s:%d  %s", filepath.Base(f.Path), c.Line, first)
-			score, ok := fuzzyScore(p.query, f.Path+" "+c.Body)
-			if ok {
-				p.items = append(p.items, pickItem{value: fmt.Sprintf("%d:%d", fi, ci), label: label, score: score})
+		for ti, t := range f.Threads {
+			line := "outdated"
+			if t.Line > 0 {
+				line = fmt.Sprint(t.Line)
+			}
+			label := fmt.Sprintf("%s:%s  %s", filepath.Base(f.Path), line, t.summary())
+			var all strings.Builder
+			for _, c := range t.Comments {
+				all.WriteString(" " + c.Body)
+			}
+			if score, ok := fuzzyScore(p.query, f.Path+all.String()); ok {
+				p.items = append(p.items, pickItem{value: fmt.Sprintf("%d:%d", fi, ti), label: label, score: score, resolved: t.Resolved})
 			}
 		}
 	}
@@ -641,14 +658,15 @@ func (p *workspacePicker) prItems(d *prData) {
 	}
 }
 
-// listSwitcher is the first row of the left list; clicking it, or ctrl+l, opens the list menu.
-func (m *model) listSwitcher(width int) string {
+// listButton is the header button that picks what the left list shows; it
+// sits left of the view-mode button. Clicking it, or ctrl+l, opens the menu.
+func (m *model) listButton() string {
 	p := m.picker
-	n := 0
 	label := "Files"
 	if p.pr != nil {
+		n := 0
 		for _, f := range p.pr.Files {
-			n += len(f.Comments)
+			n += len(f.Threads)
 		}
 		if p.list == "comments" {
 			label = fmt.Sprintf("Comments · %d", n)
@@ -656,8 +674,11 @@ func (m *model) listSwitcher(width int) string {
 			label = fmt.Sprintf("Files · %d", len(p.pr.Files))
 		}
 	}
-	text := truncate(" ▾ "+label, width)
-	return accentStyle.Bold(true).Render(text + strings.Repeat(" ", max(width-lipgloss.Width(text), 0)))
+	st := buttonStyle
+	if m.repoMenu != nil && m.repoMenu.kind == "list" {
+		st = buttonOpen
+	}
+	return st.Render(" " + label + " ▾ ")
 }
 
 func (m *model) openListMenu() {

@@ -100,8 +100,6 @@ type diffRow struct {
 	head        string
 }
 
-const diffContext = 3
-
 // hunks groups the changes between the base and the working copy, git
 // style. While editing, the whole file is one group, so every line can be
 // reached; such a group has no hunk header.
@@ -110,7 +108,7 @@ func hunks(d *Doc) (groups [][]difflib.OpCode, headers bool) {
 	if d.Ed.On {
 		return [][]difflib.OpCode{m.GetOpCodes()}, false
 	}
-	return m.GetGroupedOpCodes(diffContext), true
+	return groupOpCodes(m, diffBefore, diffAfter), true
 }
 
 func hunkHeader(g []difflib.OpCode) string {

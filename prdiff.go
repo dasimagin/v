@@ -225,7 +225,14 @@ func (d *prData) filePreview(f prFile, width int) previewLines {
 	var out previewLines
 	oldN, newN := 0, 0
 	patch := false
-	for _, l := range f.Patch {
+	pin := func(kind byte, no int) bool {
+		side := "RIGHT"
+		if kind == 'L' {
+			side = "LEFT"
+		}
+		return len(byLine[side+strconv.Itoa(no)]) > 0
+	}
+	for _, l := range reflowPatch(f.Patch, diffBefore, diffAfter, pin) {
 		tok := chroma.Text
 		key := ""
 		switch {
@@ -301,7 +308,7 @@ func (p *workspacePicker) prPreview(path string, width int) previewLines {
 	if d == nil {
 		return nil
 	}
-	key := fmt.Sprintf("pr:%d:%s:%d:%d", d.At, path, width, d.Number)
+	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d", d.At, path, width, d.Number, diffBefore, diffAfter)
 	return cachedPreview(key, 0, func() previewLines {
 		if path == "" {
 			return d.conversationPreview(width)

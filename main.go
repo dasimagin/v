@@ -592,6 +592,7 @@ func main() {
 		t = findTheme(defaultTheme)
 	}
 	applyTheme(t)
+	applyDiffSettings(s)
 	m := newModel()
 	m.workdir = dir
 	m.settings = s

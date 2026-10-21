@@ -151,13 +151,13 @@ func branchPreview(dir, ref string) previewLines {
 
 // commitPreview is one commit: message, stat and a colored patch.
 func commitPreview(dir, hash string) previewLines {
-	out, err := gitOutput(dir, "show", "--stat", "--patch", "--format=%h%nAuthor: %an <%ae>%nDate:   %cd (%cr)%n%n%B", hash, "--")
+	out, err := gitOutput(dir, "show", "--stat", "--patch", fmt.Sprintf("-U%d", max(diffBefore, diffAfter)), "--format=%h%nAuthor: %an <%ae>%nDate:   %cd (%cr)%n%n%B", hash, "--")
 	if err != nil {
 		return note(err.Error())
 	}
 	var lines previewLines
 	patch := false
-	for i, l := range strings.Split(out, "\n") {
+	for i, l := range reflowPatch(strings.Split(out, "\n"), diffBefore, diffAfter, nil) {
 		l = strings.TrimRight(l, "\r")
 		tok := chroma.Text
 		switch {

@@ -139,6 +139,73 @@ var options = []option{
 		},
 		apply: (*model).agentSettingsChanged,
 	},
+	{
+		label: "Diff context before",
+		desc:  "Unchanged lines shown above each change, in every diff",
+		values: func(*model) []string {
+			names := make([]string, len(diffContextChoices))
+			for i, n := range diffContextChoices {
+				names[i] = fmt.Sprint(n, " lines")
+			}
+			return names
+		},
+		get: func(m *model) int { return contextIndex(m.settings.DiffBefore) },
+		set: func(m *model, i int) error {
+			m.settings.DiffBefore = diffContextChoices[i]
+			applyDiffSettings(m.settings)
+			m.refreshDiffs()
+			return nil
+		},
+	},
+	{
+		label: "Diff context after",
+		desc:  "Unchanged lines shown below each change, in every diff",
+		values: func(*model) []string {
+			names := make([]string, len(diffContextChoices))
+			for i, n := range diffContextChoices {
+				names[i] = fmt.Sprint(n, " lines")
+			}
+			return names
+		},
+		get: func(m *model) int { return contextIndex(m.settings.DiffAfter) },
+		set: func(m *model, i int) error {
+			m.settings.DiffAfter = diffContextChoices[i]
+			applyDiffSettings(m.settings)
+			m.refreshDiffs()
+			return nil
+		},
+	},
+}
+
+// contextIndex is the dropdown entry closest to n lines of context.
+func contextIndex(n int) int {
+	best := 0
+	for i, c := range diffContextChoices {
+		if abs(c-n) < abs(diffContextChoices[best]-n) {
+			best = i
+		}
+	}
+	return best
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// refreshDiffs drops the diffs built with the old context sizes.
+func (m *model) refreshDiffs() {
+	reset := func(d *Doc) {
+		if d != nil {
+			d.unified, d.split = nil, nil
+		}
+	}
+	reset(m.doc)
+	for _, s := range m.stack {
+		reset(s.doc)
+	}
 }
 
 type modelChoice struct{ ID, Name string }

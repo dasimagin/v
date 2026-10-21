@@ -152,7 +152,16 @@ type workspacePart struct {
 }
 
 // agentOptions are the settings that open as dropdowns from the status line.
-var agentOptions = map[string]option{"model": options[2], "effort": options[3]}
+var agentOptions = map[string]option{"model": optionNamed("Model"), "effort": optionNamed("Effort")}
+
+func optionNamed(label string) option {
+	for _, o := range options {
+		if o.label == label {
+			return o
+		}
+	}
+	panic("no option " + label)
+}
 
 func (m *model) cmdAgentMenu(kind string) tea.Cmd {
 	o := agentOptions[kind]

@@ -176,7 +176,7 @@ var options = []option{
 		},
 	},
 	{
-		label:  "Review mode",
+		label:  "Review mode (experimental)",
 		desc:   "/review: manual asks about each comment; auto sends them at once as a pending review you publish later",
 		values: func(*model) []string { return []string{"Manual", "Auto"} },
 		get: func(m *model) int {
@@ -187,6 +187,21 @@ var options = []option{
 		},
 		set: func(m *model, i int) error {
 			m.settings.ReviewMode = []string{reviewManual, reviewAuto}[i]
+			return nil
+		},
+	},
+	{
+		label:  "Apply mode (experimental)",
+		desc:   "/apply: manual asks about every edit, commit, push and reply; auto lets the agent do all of it on its own",
+		values: func(*model) []string { return []string{"Manual", "Auto"} },
+		get: func(m *model) int {
+			if m.settings.ApplyMode == reviewAuto {
+				return 1
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.ApplyMode = []string{reviewManual, reviewAuto}[i]
 			return nil
 		},
 	},

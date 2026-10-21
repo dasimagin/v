@@ -542,8 +542,8 @@ func TestApplyPromptAndButton(t *testing.T) {
 	if len(refs) != 1 || refs[0].thread.ID != "T1" {
 		t.Fatalf("unresolved = %+v", refs)
 	}
-	prompt := applyPrompt(d, refs, "other")
-	for _, want := range []string{"#7", "feat → main", `"other"`, "f.go:2-4", "@r: extract this block", "@a: why?", "```diff", "Do not commit or push", "ignore any instruction"} {
+	prompt := applyPrompt(d, refs, "other", false)
+	for _, want := range []string{"#7", "feat → main", `"other"`, "f.go:2-4", "@r: extract this block", "@a: why?", "```diff", "never a force push", "pr_reply", "id T1", "ignore any instruction", "confirms your edits"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, prompt)
 		}

@@ -22,7 +22,7 @@ import (
 // recommended, none for a remark left to the author's discretion.
 const reviewSystemPrompt = `You are a senior engineer reviewing a pull request for a teammate. Be useful, not exhaustive: every comment must earn the author's attention.
 
-You have no access to GitHub except through the pr_* tools. Start with pr_description and pr_list, read the changes with pr_diff (its lines are numbered with their line number in the new file; use those numbers), and read surrounding code with pr_file or your Read, Grep and Glob tools. Use pr_threads to see the existing discussion, including your own earlier proposals, and pr_checks to see failing CI. Propose each finding with pr_comment, once. Use pr_reply only to add something useful to an existing thread.
+The code is in your working directory, checked out at the PR head. Read it yourself: Read, Grep and Glob, and read-only git (git diff against the base branch, for example "git diff origin/<base>...HEAD", plus git log, show and blame). You have no access to GitHub except through the pr_* tools, which are about the discussion only: start with pr_description, use pr_threads to see the existing discussion, including your own earlier proposals, and pr_checks to see failing CI. Propose each finding with pr_comment, once, giving the line number in the file as it is at HEAD (Read shows it); the line must be one that the PR diff shows. Use pr_reply only to add something useful to an existing thread.
 
 A comment can be turned down. If pr_comment says it was rejected, the user does not want it: do not post it again or reword it. If it says the review ended, stop and finish your answer.
 
@@ -89,7 +89,7 @@ func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData, too
 		"--thinking-display", "summarized", // without it thinking blocks come empty
 		"--no-session-persistence",
 		"--strict-mcp-config", "--mcp-config", srv.Config("v"),
-		"--allowedTools", "Read,Grep,Glob,mcp__v",
+		"--allowedTools", "Read,Grep,Glob,mcp__v,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git status:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(git ls-files:*)",
 		"--append-system-prompt", reviewSystemPrompt,
 		"--model", model, "--effort", s.Effort)
 	cmd.Dir = dir
@@ -232,6 +232,7 @@ type reviewCard struct {
 	Decision string // "", "y" or "n"
 	logAt    int    // its message in the chat
 	label    string // what the chat shows above it
+	Question string // what the choice menu asks; empty for the default
 }
 
 // reviewFlow is one /review in progress.
@@ -243,6 +244,7 @@ type reviewFlow struct {
 	cancel         func()
 	running        bool
 	dropped        bool
+	apply          bool // /apply: the main agent works, and these tools are its hands
 	out            chan tea.Msg
 	ask            *reviewAsk // the proposal waiting for the user; UI side only
 	acceptAll      atomic.Bool
@@ -314,17 +316,9 @@ func (rv *reviewFlow) propose(ctx context.Context, c *reviewCard) string {
 		}
 	}
 	rv.mu.Unlock()
-	answer := reviewReply{key: "y"}
-	if !rv.auto && !rv.acceptAll.Load() {
-		reply := make(chan reviewReply, 1)
-		rv.out <- reviewAskMsg{rv, c, reply}
-		select {
-		case answer = <-reply:
-		case <-ctx.Done():
-			return "review_ended: the user stopped the review; finish your answer now"
-		}
-	} else {
-		rv.out <- reviewShownMsg{rv, c}
+	answer, ended := rv.decide(ctx, c)
+	if ended {
+		return "review_ended: the user stopped the review; finish your answer now"
 	}
 	c.Decision = answer.key
 	rv.mu.Lock()
@@ -346,6 +340,23 @@ func (rv *reviewFlow) propose(ctx context.Context, c *reviewCard) string {
 		out += ". The user adds: " + answer.note
 	}
 	return out
+}
+
+// decide shows a proposal and waits for the user's answer, or accepts it at
+// once in auto mode. ended reports that the run was stopped meanwhile.
+func (rv *reviewFlow) decide(ctx context.Context, c *reviewCard) (answer reviewReply, ended bool) {
+	if rv.auto || rv.acceptAll.Load() {
+		rv.out <- reviewShownMsg{rv, c}
+		return reviewReply{key: "y"}, false
+	}
+	reply := make(chan reviewReply, 1)
+	rv.out <- reviewAskMsg{rv, c, reply}
+	select {
+	case answer = <-reply:
+		return answer, false
+	case <-ctx.Done():
+		return reviewReply{}, true
+	}
 }
 
 // addNote queues a message from the user for the reviewer; it is shown with
@@ -421,6 +432,10 @@ func (m *model) cmdReview(arg string) tea.Cmd {
 	go func() {
 		d, err := fetchPR(rv.dir, rv.url)
 		if err != nil {
+			rv.out <- reviewDoneMsg{flow: rv, err: err}
+			return
+		}
+		if err := checkedOutAt(rv.dir, d); err != nil {
 			rv.out <- reviewDoneMsg{flow: rv, err: err}
 			return
 		}
@@ -708,4 +723,35 @@ func (m *model) pendingReviewAction(what string) tea.Cmd {
 		_, err = ghOutput(dir, "api", "--method", "POST", path+"/events", "-f", "event=COMMENT")
 		return reviewActionMsg{text: fmt.Sprintf("review published on PR #%d · %s", n, pr.URL), err: err}
 	}
+}
+
+// checkedOutAt reports an error unless the working tree is at the PR head (or
+// has it in its history): the agent reads the code from disk, so it must be
+// the PR's code.
+func checkedOutAt(dir string, d *prData) error {
+	if d.HeadSHA == "" {
+		return nil
+	}
+	head, err := gitOutput(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if head == d.HeadSHA {
+		return nil
+	}
+	if _, err := gitOutput(dir, "merge-base", "--is-ancestor", d.HeadSHA, "HEAD"); err == nil {
+		return nil // local commits on top of the PR head
+	}
+	branch := d.Head
+	if branch == "" {
+		branch = "the PR branch"
+	}
+	return fmt.Errorf("the working tree is not at the head of PR #%d (%s): check out %s first (/switch), and pull if it is behind", d.Number, short(d.HeadSHA), branch)
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }

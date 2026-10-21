@@ -77,8 +77,11 @@ func (m *model) onEvent(e ev) {
 	case evToolError:
 		m.noteErr(e.text)
 	case evAsk:
-		m.ask(e.perm)
+		if !m.applyPermission(e.perm) {
+			m.ask(e.perm)
+		}
 	case evDone:
+		m.finishApply()
 		m.busy = false
 		switch {
 		case m.interrupted:
@@ -206,22 +209,26 @@ func (m *model) connect() tea.Cmd {
 	if m.resumeNext {
 		resume = m.sessionID
 	}
-	a, err := startBackend(m.workdir, m.settings, resume)
+	var tools []mcpTool
+	if m.toolsOn && m.settings.Agent != agentCodex {
+		tools = applyTools(m.hub)
+	}
+	a, err := startBackend(m.workdir, m.settings, resume, tools)
 	if err != nil {
 		m.resumeNext = resume != ""
 		m.noteErr(err.Error())
 		return nil
 	}
-	m.agent, m.resumeNext = a, false
+	m.agent, m.resumeNext, m.agentHasTools = a, false, len(tools) > 0
 	return a.wait()
 }
 
 // startBackend starts the agent named in the settings.
-func startBackend(dir string, s Settings, resume string) (backend, error) {
+func startBackend(dir string, s Settings, resume string, tools []mcpTool) (backend, error) {
 	if s.Agent == agentCodex {
 		return startCodex(dir, s, resume)
 	}
-	return startClaude(dir, s, resume)
+	return startClaude(dir, s, resume, tools)
 }
 
 // sendQueued sends the next queued prompt once the agent is idle.
@@ -287,7 +294,7 @@ func (m *model) stopAgent() {
 	if m.agent != nil {
 		m.agent.Close()
 	}
-	m.agent, m.busy, m.perm, m.agentReady, m.agentStale = nil, false, nil, false, false
+	m.agent, m.busy, m.perm, m.agentReady, m.agentStale, m.agentHasTools = nil, false, nil, false, false, false
 	m.queue = nil
 }
 
@@ -336,6 +343,8 @@ func (m *model) renderChoices() []string {
 	question := "? Post this comment to the PR?"
 	if m.perm != nil {
 		question = "? Allow " + m.perm.summary + "?"
+	} else if q := m.rv.ask.card.Question; q != "" {
+		question = "? " + q
 	}
 	out := []string{bg.Render(" ") + ask.Render(question)}
 	labelW := 0

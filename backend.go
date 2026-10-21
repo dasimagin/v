@@ -76,6 +76,7 @@ const denyMessage = "The user denied this in v."
 type permission struct {
 	id      any    // the backend's request id
 	summary string // "Edit main.go", "Bash go test ./..."
+	tool    string // the tool's name: "Edit", "Bash", "mcp__v__pr_reply"
 	// propose builds the file as the tool call would leave it; nil for tool
 	// calls that are not file edits.
 	propose func() (*Doc, error)

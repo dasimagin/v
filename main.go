@@ -44,7 +44,10 @@ type model struct {
 	repo                                 *repository
 	repoMenu                             *repoMenu
 	picker                               *workspacePicker
-	rv                                   *reviewFlow // /review in progress
+	rv                                   *reviewFlow // /review or /apply in progress
+	hub                                  *applyHub   // points the chat agent's pr_* tools at the /apply run
+	toolsOn                              bool        // the chat agent gets v's pr_* tools (from the first /apply)
+	agentHasTools                        bool        // the running agent was started with them
 	repoSeq                              int
 	repoLoading, prLoading, repoChanging bool
 
@@ -86,7 +89,7 @@ func newModel() model {
 	ti.Placeholder = placeholder
 	ti.Focus()
 	dir, _ := os.Getwd()
-	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified}
+	m := model{omni: ti, tagline: rand.IntN(len(taglines)), workdir: dir, repoLoading: true, rmode: viewUnified, hub: &applyHub{}}
 	m.styleOmni()
 	m.hist = loadHistory()
 	return m
@@ -210,6 +213,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onReviewAsk(msg)
 	case reviewShownMsg:
 		return m, m.onReviewShown(msg)
+	case reviewEndMsg:
+		return m, nil
 	case reviewDoneMsg:
 		return m, m.onReviewDone(msg)
 	case reviewPostedMsg:
@@ -582,7 +587,7 @@ func (m model) hint() string {
 	switch {
 	case m.reviewAsking():
 		return "↑↓ choose · enter answer · tab add a note for Claude · esc skip this comment"
-	case m.rv != nil && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
+	case m.rv != nil && !m.rv.apply && m.rv.running && m.rv.cancel != nil && m.mode == modeChat:
 		return "Claude is reviewing… · type a note for it · esc stops"
 	case m.mode == modePick:
 		switch m.picker.kind {

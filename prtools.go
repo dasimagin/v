@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -15,11 +13,6 @@ import (
 // The tools the reviewer gets, served by v's MCP server. All of them are
 // about the one PR under review; the writes only propose comments to v.
 const toolPrefix = "pr_"
-
-const (
-	listDefault = 500 // lines per page of a diff or file
-	fileMaxSize = 2 << 20
-)
 
 // ghInput runs gh with stdin and returns stdout.
 func ghInput(dir string, stdin []byte, args ...string) ([]byte, error) {
@@ -65,52 +58,6 @@ func ghGraphQL(dir, query string, vars map[string]any) ([]byte, error) {
 	return ghOutput(dir, args...)
 }
 
-// numberedPatch is a file's patch with the new-file line number in front of
-// every line that exists there, which is what a comment anchors to.
-func numberedPatch(f prFile, context int) []string {
-	var out []string
-	newN := 0
-	for _, l := range reflowPatch(f.Patch, context, context, nil) {
-		switch {
-		case hunkPattern.MatchString(l):
-			newN, _ = strconv.Atoi(hunkPattern.FindStringSubmatch(l)[2])
-			out = append(out, "      "+l)
-		case newN == 0 || strings.HasPrefix(l, "diff --git"):
-			out = append(out, "      "+l)
-		case strings.HasPrefix(l, "-"), strings.HasPrefix(l, "\\"):
-			out = append(out, "      |"+l)
-		default:
-			out = append(out, fmt.Sprintf("%5d |%s", newN, l))
-			newN++
-		}
-	}
-	return out
-}
-
-// page returns lines[offset:offset+limit] and a note about the rest.
-func page(lines []string, offset, limit int) string {
-	if limit <= 0 {
-		limit = listDefault
-	}
-	offset = max(offset, 0)
-	if offset >= len(lines) {
-		return fmt.Sprintf("(no more lines; there are %d)", len(lines))
-	}
-	end := min(offset+limit, len(lines))
-	out := strings.Join(lines[offset:end], "\n")
-	if end < len(lines) {
-		out += fmt.Sprintf("\n[%d more lines; call again with offset=%d]", len(lines)-end, end)
-	}
-	return out
-}
-
-type fileArgs struct {
-	Path   string `json:"path"`
-	Ref    string `json:"ref"`
-	Offset int    `json:"offset"`
-	Limit  int    `json:"limit"`
-}
-
 func prTools(rv *reviewFlow) []mcpTool {
 	file := func(path string) (prFile, error) {
 		for _, f := range rv.data.Files {
@@ -118,7 +65,7 @@ func prTools(rv *reviewFlow) []mcpTool {
 				return f, nil
 			}
 		}
-		return prFile{}, fmt.Errorf("%s is not changed in this PR; call %slist for the changed files", path, toolPrefix)
+		return prFile{}, fmt.Errorf("%s is not changed in this PR; look at the diff of the working tree for the changed files", path)
 	}
 	decode := func(raw json.RawMessage, v any) error {
 		if len(raw) == 0 {
@@ -142,86 +89,6 @@ func prTools(rv *reviewFlow) []mcpTool {
 				}
 				return fmt.Sprintf("#%d %s\nby @%s · %s · %s ← %s · %d files\nlabels: %s\n\n%s", d.Number, d.Title, d.Author, state,
 					d.Base, d.Head, len(d.Files), strings.Join(d.Labels, ", "), strings.TrimSpace(d.Body)), nil
-			},
-		},
-		{
-			Name:        toolPrefix + "list",
-			Description: "The files this PR changes, with added and removed line counts and the number of existing review comments. Optional filter: a substring of the path.",
-			Schema:      `{"type":"object","properties":{"filter":{"type":"string"}}}`,
-			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
-				var a struct{ Filter string }
-				if err := decode(raw, &a); err != nil {
-					return "", err
-				}
-				var lines []string
-				for _, f := range rv.data.Files {
-					if a.Filter == "" || strings.Contains(f.Path, a.Filter) {
-						lines = append(lines, fmt.Sprintf("%s  +%d -%d  %d threads", f.Path, f.Adds, f.Dels, len(f.Threads)))
-					}
-				}
-				if len(lines) == 0 {
-					return "no matching files", nil
-				}
-				return strings.Join(lines, "\n"), nil
-			},
-		},
-		{
-			Name: toolPrefix + "diff",
-			Description: "The diff of one changed file. Every line that exists in the new file is prefixed with its line number there; pr_comment anchors to those numbers. " +
-				"context sets the unchanged lines around changes (default 3). Long diffs come in pages: use offset and limit.",
-			Schema: `{"type":"object","properties":{"path":{"type":"string"},"context":{"type":"integer"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["path"]}`,
-			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
-				var a struct {
-					Path    string
-					Context *int
-					Offset  int
-					Limit   int
-				}
-				if err := decode(raw, &a); err != nil {
-					return "", err
-				}
-				f, err := file(a.Path)
-				if err != nil {
-					return "", err
-				}
-				n := 3
-				if a.Context != nil {
-					n = max(*a.Context, 0)
-				}
-				return page(numberedPatch(f, n), a.Offset, a.Limit), nil
-			},
-		},
-		{
-			Name: toolPrefix + "file",
-			Description: "A whole file as of the PR head (ref=head, default) or the base branch tip (ref=base), with line numbers. " +
-				"Use it for code the diff does not show. Long files come in pages: use offset and limit.",
-			Schema: `{"type":"object","properties":{"path":{"type":"string"},"ref":{"type":"string","enum":["head","base"]},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["path"]}`,
-			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
-				var a fileArgs
-				if err := decode(raw, &a); err != nil {
-					return "", err
-				}
-				sha := rv.data.HeadSHA
-				if a.Ref == "base" {
-					sha = rv.data.BaseSHA
-				}
-				segs := strings.Split(strings.Trim(a.Path, "/"), "/")
-				for i := range segs {
-					segs[i] = url.PathEscape(segs[i])
-				}
-				out, err := ghOutput(rv.dir, "api", "-H", "Accept: application/vnd.github.raw",
-					fmt.Sprintf("repos/%s/contents/%s?ref=%s", rv.repo, strings.Join(segs, "/"), sha))
-				if err != nil {
-					return "", fmt.Errorf("cannot read %s at %s: %w", a.Path, a.Ref, err)
-				}
-				if len(out) > fileMaxSize {
-					return "", fmt.Errorf("%s is too large to read", a.Path)
-				}
-				lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-				for i := range lines {
-					lines[i] = fmt.Sprintf("%5d |%s", i+1, lines[i])
-				}
-				return page(lines, a.Offset, a.Limit), nil
 			},
 		},
 		{
@@ -251,7 +118,7 @@ func prTools(rv *reviewFlow) []mcpTool {
 		},
 		{
 			Name: toolPrefix + "comment",
-			Description: "Propose an inline review comment on a line of the new file that appears in the diff (use the numbers from pr_diff). " +
+			Description: "Propose an inline review comment on a line of the new file that the PR diff shows (the line number in the file as of the PR head). " +
 				"For a comment about several lines, also give start_line: the comment then covers start_line to line, and both must be in the same hunk. " +
 				"The user may reject it; the result says so. level is critical, recommended or note.",
 			Schema: `{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"start_line":{"type":"integer"},"level":{"type":"string","enum":["critical","recommended","note"]},"body":{"type":"string"}},"required":["path","line","level","body"]}`,
@@ -275,7 +142,7 @@ func prTools(rv *reviewFlow) []mcpTool {
 					start = a.Line
 				}
 				if !f.newLines()[a.Line] {
-					return "", fmt.Errorf("invalid: line %d of %s is not in the diff; comments can only attach to lines shown by %sdiff", a.Line, a.Path, toolPrefix)
+					return "", fmt.Errorf("invalid: line %d of %s is not in the diff; comments can only attach to lines that the PR changes or shows as context", a.Line, a.Path)
 				}
 				if !f.rangeOK(start, a.Line) {
 					return "", fmt.Errorf("invalid: lines %d to %d of %s are not one stretch of the diff; a range must start before it ends and stay inside one hunk", start, a.Line, a.Path)

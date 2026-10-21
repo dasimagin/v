@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -33,25 +35,6 @@ func callTool(t *testing.T, rv *reviewFlow, name, args string) (string, error) {
 	}
 	t.Fatalf("no tool %s", name)
 	return "", nil
-}
-
-func TestPRDiffNumbersNewLines(t *testing.T) {
-	out, err := callTool(t, testFlow(true), "pr_diff", `{"path":"f.go"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"    1 | keep", "      |-old", "    2 |+new", "    3 | tail"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("diff lacks %q:\n%s", want, out)
-		}
-	}
-	if _, err := callTool(t, testFlow(true), "pr_diff", `{"path":"nope.go"}`); err == nil {
-		t.Error("an unchanged file must fail")
-	}
-	list, _ := callTool(t, testFlow(true), "pr_list", `{}`)
-	if !strings.Contains(list, "f.go  +1 -1") {
-		t.Errorf("list = %q", list)
-	}
 }
 
 func TestPRCommentAutoAndRejections(t *testing.T) {
@@ -204,7 +187,7 @@ func TestNotesReachTheReviewerWithTheNextToolResult(t *testing.T) {
 	rv.addNote("focus on error handling")
 	var list mcpTool
 	for _, tool := range rv.withNotes(prTools(rv)) {
-		if tool.Name == "pr_list" {
+		if tool.Name == "pr_description" {
 			list = tool
 		}
 	}
@@ -242,5 +225,38 @@ func TestReviewQuestionUsesTheChoiceMenu(t *testing.T) {
 	}
 	if m.showChoices() {
 		t.Error("the menu must close after the answer")
+	}
+}
+
+func TestCheckedOutAt(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-b", "main")
+	run("commit", "--allow-empty", "-m", "one")
+	first := run("rev-parse", "HEAD")
+	d := &prData{Number: 7, Head: "feat", HeadSHA: first}
+	if err := checkedOutAt(dir, d); err != nil {
+		t.Errorf("at the head: %v", err)
+	}
+	run("commit", "--allow-empty", "-m", "two") // local commits on top are fine
+	if err := checkedOutAt(dir, d); err != nil {
+		t.Errorf("ahead of the head: %v", err)
+	}
+	d.HeadSHA = strings.Repeat("a", 40) // a commit this checkout does not have
+	if err := checkedOutAt(dir, d); err == nil || !strings.Contains(err.Error(), "check out feat") {
+		t.Errorf("a different head must be refused: %v", err)
 	}
 }

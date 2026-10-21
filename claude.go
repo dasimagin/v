@@ -24,6 +24,7 @@ type claudeAgent struct {
 	events chan ev
 	stderr bytes.Buffer
 	reqN   int
+	mcp    *mcpServer // v's tools for this session, if any
 }
 
 // claudeMsg is one line from the CLI; only the fields v uses are decoded.
@@ -44,7 +45,7 @@ type claudeMsg struct {
 
 // startClaude runs Claude Code in dir with the model and effort from s;
 // resume, if set, continues that session.
-func startClaude(dir string, s Settings, resume string) (*claudeAgent, error) {
+func startClaude(dir string, s Settings, resume string, tools []mcpTool) (*claudeAgent, error) {
 	model := s.Model
 	if env := os.Getenv("V_CLAUDE_MODEL"); env != "" {
 		model = env // only for testing v cheaply
@@ -62,13 +63,21 @@ func startClaude(dir string, s Settings, resume string) (*claudeAgent, error) {
 	if resume != "" {
 		cmd.Args = append(cmd.Args, "--resume", resume)
 	}
+	var srv *mcpServer
+	if len(tools) > 0 {
+		var err error
+		if srv, err = startMCP(tools); err != nil {
+			return nil, err
+		}
+		cmd.Args = append(cmd.Args, "--mcp-config", srv.Config("v")) // alongside the user's own MCP servers
+	}
 	cmd.Dir = dir
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
-	a := &claudeAgent{cmd: cmd, events: make(chan ev, 256)}
+	a := &claudeAgent{cmd: cmd, events: make(chan ev, 256), mcp: srv}
 	cmd.Stderr = &a.stderr
 	var err error
 	if a.in, err = cmd.StdinPipe(); err != nil {
@@ -79,6 +88,9 @@ func startClaude(dir string, s Settings, resume string) (*claudeAgent, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		if srv != nil {
+			srv.Close()
+		}
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 	go func() {
@@ -152,6 +164,9 @@ func (a *claudeAgent) Close() {
 	if a.cmd.Process != nil {
 		_ = a.cmd.Process.Kill()
 	}
+	if a.mcp != nil {
+		a.mcp.Close()
+	}
 }
 
 // claudeEvents translates one CLI message.
@@ -212,7 +227,7 @@ func claudeEvents(msg claudeMsg, dirs ...string) []ev {
 		if json.Unmarshal(msg.Request, &req) != nil || req.Subtype != "can_use_tool" {
 			return nil
 		}
-		p := &permission{id: msg.RequestID, summary: toolSummary(req.ToolName, req.Input, dirs...), input: req.Input}
+		p := &permission{id: msg.RequestID, summary: toolSummary(req.ToolName, req.Input, dirs...), tool: req.ToolName, input: req.Input}
 		if reviewTools[req.ToolName] {
 			p.propose = func() (*Doc, error) { return proposedDoc(req.ToolName, req.Input, dirs...) }
 		}

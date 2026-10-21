@@ -70,11 +70,11 @@ func applyTools(h *applyHub) []mcpTool {
 				if err := json.Unmarshal(raw, &a); err != nil || a.Thread == "" || strings.TrimSpace(a.Body) == "" {
 					return "", fmt.Errorf("invalid: a thread id and a body are required")
 				}
-				card := &reviewCard{Thread: a.Thread, Body: strings.TrimSpace(a.Body), label: "reply in thread " + a.Thread, Question: "Post this reply to GitHub?"}
+				card := &reviewCard{Thread: a.Thread, Body: strings.TrimSpace(a.Body), label: "reply · " + rv.threadLabel(a.Thread), Question: "Post this reply to GitHub?"}
 				if out, done := rv.gate(ctx, card, "reply"); done {
 					return out, nil
 				}
-				if err := postThreadReply(rv.dir, a.Thread, card.Body); err != nil {
+				if err := postThreadReply(rv.dir, rv.repo, rv.number, a.Thread, card.Body); err != nil {
 					return "", err
 				}
 				return "posted", nil
@@ -93,7 +93,7 @@ func applyTools(h *applyHub) []mcpTool {
 				if err := json.Unmarshal(raw, &a); err != nil || a.Thread == "" {
 					return "", fmt.Errorf("invalid: a thread id is required")
 				}
-				card := &reviewCard{Thread: a.Thread, Body: "Mark thread " + a.Thread + " as resolved", label: "resolve thread", Question: "Resolve this thread?"}
+				card := &reviewCard{Thread: a.Thread, Body: "Mark the thread as resolved", label: "resolve · " + rv.threadLabel(a.Thread), Question: "Resolve this thread?"}
 				if out, done := rv.gate(ctx, card, "resolution"); done {
 					return out, nil
 				}
@@ -125,7 +125,7 @@ func (rv *reviewFlow) gate(ctx context.Context, c *reviewCard, what string) (out
 
 // postThreadReply answers in a thread: GitHub replies hang off a comment, so
 // it finds the thread's first one.
-func postThreadReply(dir, thread, body string) error {
+func postThreadReply(dir, repo string, number int, thread, body string) error {
 	out, err := ghGraphQL(dir, `query($id:ID!){node(id:$id){... on PullRequestReviewThread{comments(first:1){nodes{databaseId}}}}}`, map[string]any{"id": thread})
 	if err != nil {
 		return err
@@ -140,11 +140,34 @@ func postThreadReply(dir, thread, body string) error {
 	if err := json.Unmarshal(out, &res); err != nil || len(res.Data.Node.Comments.Nodes) == 0 {
 		return fmt.Errorf("thread %s was not found", thread)
 	}
-	repoOut, err := ghOutput(dir, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
-	if err != nil {
-		return err
-	}
-	repo := strings.TrimSpace(string(repoOut))
-	_, err = ghOutput(dir, "api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/comments/%d/replies", repo, res.Data.Node.Comments.Nodes[0].DatabaseID), "-f", "body="+body)
+	_, err = ghOutput(dir, "api", "--method", "POST", replyEndpoint(repo, number, res.Data.Node.Comments.Nodes[0].DatabaseID), "-f", "body="+body)
 	return err
+}
+
+// replyEndpoint is where a reply to a review comment is posted. The pull
+// request number is part of the path; without it GitHub answers 404.
+func replyEndpoint(repo string, number int, comment int64) string {
+	return fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", repo, number, comment)
+}
+
+// threadLabel says where a thread is, for the cards the user answers.
+func (rv *reviewFlow) threadLabel(id string) string {
+	if rv.data != nil {
+		for _, f := range rv.data.Files {
+			for _, t := range f.Threads {
+				if t.ID != id {
+					continue
+				}
+				who := ""
+				if len(t.Comments) > 0 {
+					who = " (@" + t.Comments[0].Author + ")"
+				}
+				if t.Line > 0 {
+					return fmt.Sprintf("%s:%d%s", f.Path, t.Line, who)
+				}
+				return f.Path + who
+			}
+		}
+	}
+	return "thread " + id
 }

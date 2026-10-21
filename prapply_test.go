@@ -170,3 +170,19 @@ func TestFinishApplyReleasesTheRun(t *testing.T) {
 		t.Error("finishApply must not end a /review")
 	}
 }
+
+func TestReplyEndpointHasThePullNumber(t *testing.T) {
+	if got := replyEndpoint("o/r", 7, 99); got != "repos/o/r/pulls/7/comments/99/replies" {
+		t.Errorf("endpoint = %q", got)
+	}
+}
+
+func TestThreadLabelNamesThePlace(t *testing.T) {
+	rv := &reviewFlow{data: &prData{Files: []prFile{{Path: "git.go", Threads: []prThread{{ID: "T1", Line: 42, Comments: []prComment{{Author: "alice"}}}}}}}}
+	if got := rv.threadLabel("T1"); got != "git.go:42 (@alice)" {
+		t.Errorf("label = %q", got)
+	}
+	if got := rv.threadLabel("nope"); got != "thread nope" {
+		t.Errorf("unknown = %q", got)
+	}
+}

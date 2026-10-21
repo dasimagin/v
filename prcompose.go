@@ -63,7 +63,14 @@ func (m *model) composeLine(file prFile, line int) tea.Cmd {
 }
 
 func (m *model) composeGeneral() tea.Cmd {
-	return m.beginCompose(&composeState{kind: "general", hint: "new comment on the PR · enter sends it · esc cancels"})
+	if immediateComments {
+		return m.beginCompose(&composeState{kind: "general", hint: "new comment on the PR · enter sends it to GitHub · esc cancels"})
+	}
+	// A plain PR comment cannot wait in a pending review, so this writes the
+	// review's summary, which is sent with it.
+	cmd := m.beginCompose(&composeState{kind: "general", hint: "review summary, sent with your review when you submit it · enter saves (empty clears) · esc cancels"})
+	m.setOmni(reviewSummaries[m.picker.pr.URL])
+	return cmd
 }
 
 func (m *model) beginCompose(c *composeState) tea.Cmd {
@@ -219,16 +226,34 @@ func (m *model) composeKey(msg tea.KeyMsg) tea.Cmd {
 func (m *model) sendCompose() tea.Cmd {
 	p, c := m.picker, m.picker.compose
 	text := strings.TrimSpace(m.omni.Value())
-	if text == "" {
+	summary := c.kind == "general" && !immediateComments
+	if text == "" && !summary {
 		return nil
 	}
 	d := p.pr
 	dir := m.repo.Root
+	if summary { // saved here, sent with the review
+		if text == "" {
+			delete(reviewSummaries, d.URL)
+		} else {
+			reviewSummaries[d.URL] = text
+		}
+		d.At++ // drops the cached previews
+		p.compose = nil
+		m.setOmni("")
+		m.rebuildPicker()
+		m.flash("review summary saved · it is sent when you submit the review")
+		return nil
+	}
 	var post func() error
 	switch c.kind {
 	case "reply":
 		id := c.thread.Comments[0].ID
+		thread := c.thread.ID
 		post = func() error {
+			if !immediateComments {
+				return addPendingReply(dir, d, thread, text)
+			}
 			_, err := ghOutput(dir, "api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", d.Repo, d.Number, id), "-f", "body="+text)
 			return err
 		}
@@ -254,7 +279,11 @@ func (m *model) sendCompose() tea.Cmd {
 			review["start_line"], review["start_side"] = start, "RIGHT"
 		}
 		body, _ := json.Marshal(review)
+		path := c.file.Path
 		post = func() error {
+			if !immediateComments {
+				return addPendingComment(dir, d, path, start, line, comment)
+			}
 			_, err := ghInput(dir, body, "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/comments", d.Repo, d.Number))
 			return err
 		}
@@ -270,7 +299,11 @@ func (m *model) sendCompose() tea.Cmd {
 	p.seq = prSeq
 	seq := p.seq
 	m.flash("sending to GitHub…")
-	return func() tea.Msg { return prComposedMsg{seq, "sent to GitHub", post()} }
+	done := "sent to GitHub"
+	if !immediateComments {
+		done = "added to your pending review · submit it from the header"
+	}
+	return func() tea.Msg { return prComposedMsg{seq, done, post()} }
 }
 
 // onPRComposed reloads the PR so the new comment shows up.

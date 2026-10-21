@@ -665,7 +665,11 @@ func (m *model) pendingReviewAction(what string) tea.Cmd {
 			_, err = ghOutput(dir, "api", "--method", "DELETE", path)
 			return reviewActionMsg{text: fmt.Sprintf("pending review of PR #%d deleted", n), err: err}
 		}
-		_, err = ghOutput(dir, "api", "--method", "POST", path+"/events", "-f", "event=COMMENT")
+		payload := fmt.Sprintf(`{"event":"COMMENT","body":%q}`, strings.TrimSpace(reviewSummaries[pr.URL]))
+		_, err = ghInput(dir, []byte(payload), "api", "--method", "POST", "--input", "-", path+"/events")
+		if err == nil {
+			delete(reviewSummaries, pr.URL)
+		}
 		return reviewActionMsg{text: fmt.Sprintf("review published on PR #%d · %s", n, pr.URL), err: err}
 	}
 }

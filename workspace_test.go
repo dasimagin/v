@@ -650,3 +650,102 @@ func TestDeletingYourOwnComments(t *testing.T) {
 		t.Errorf("no viewer, no delete buttons: %+v", hits)
 	}
 }
+
+func TestSubmitMenuAndPendingSummary(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[],"headRefOid":"abc"}`
+	threads := `{"data":{"repository":{"pullRequest":{"id":"PR_node","reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":2,"comments":{"nodes":[` +
+		`{"id":"RC1","databaseId":9,"author":{"login":"r"},"body":"theirs","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"},` +
+		`{"id":"RC2","databaseId":10,"author":{"login":"me"},"body":"my pending reply","createdAt":"2026-01-02T00:00:00Z","state":"PENDING"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(rangeDiff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Viewer = "me"
+	if d.NodeID != "PR_node" || d.pendingCount() != 1 {
+		t.Fatalf("node=%q pending=%d", d.NodeID, d.pendingCount())
+	}
+	delete(reviewSummaries, d.URL)
+	defer delete(reviewSummaries, d.URL)
+	m := newModel()
+	m.w, m.h, m.mode = 160, 40, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+
+	if btn := ansi.Strip(m.submitButton()); !strings.Contains(btn, "Submit [1]") {
+		t.Errorf("button = %q", btn)
+	}
+	// The Conversation button writes the review's summary in pending mode.
+	if immediateComments {
+		t.Fatal("pending must be the default")
+	}
+	m.picker.sel = 0
+	m.pickerPreview()
+	if label := generalButtonLabel(); !strings.Contains(label, "Review summary") {
+		t.Errorf("label = %q", label)
+	}
+	m.composeGeneral()
+	m.setOmni("Looks good overall, two small things.")
+	if cmd := m.sendCompose(); cmd != nil {
+		t.Error("saving a summary is local: no command")
+	}
+	if got := reviewSummaries[d.URL]; got != "Looks good overall, two small things." {
+		t.Fatalf("summary = %q", got)
+	}
+	if btn := ansi.Strip(m.submitButton()); !strings.Contains(btn, "Submit [2]") {
+		t.Errorf("the summary counts: %q", btn)
+	}
+	m.pickerPreview()
+	lines, _ := d.conversationPreview(80)
+	var text []string
+	for _, l := range lines {
+		s := ""
+		for _, g := range l {
+			s += g.text
+		}
+		text = append(text, ansi.Strip(s))
+	}
+	if j := strings.Join(text, "\n"); !strings.Contains(j, "Looks good overall") || !strings.Contains(j, "sent with Submit") {
+		t.Errorf("the summary must show in Conversation:\n%s", j)
+	}
+
+	// The header button opens the verdict menu under it, with all four entries.
+	x, _ := m.submitMenuLayout()
+	m.workspaceClick(x+1, toolbarRow)
+	if m.submitMenu == nil {
+		t.Fatal("the button must open the menu")
+	}
+	rows := strings.Split(ansi.Strip(m.overlayMenus(strings.Repeat(strings.Repeat(" ", m.w)+"\n", m.h-1)+strings.Repeat(" ", m.w))), "\n")
+	for i, want := range []string{"Comment", "Approve", "Request changes", "Discard the pending review"} {
+		if !strings.Contains(rows[toolbarRow+1+i], want) {
+			t.Errorf("menu row %d = %q, want %q", i, rows[toolbarRow+1+i], want)
+		}
+	}
+	m.workspaceClick(x+1, toolbarRow) // the button again closes it
+	if m.submitMenu != nil {
+		t.Error("a second click closes the menu")
+	}
+	// Request changes needs a summary.
+	delete(reviewSummaries, d.URL)
+	m.openSubmitMenu()
+	m.submitMenu.sel = 2
+	if cmd := m.submitMenuKey("enter"); cmd != nil || !strings.Contains(m.status, "needs a summary") {
+		t.Errorf("request changes without a summary: cmd=%v status=%q", cmd, m.status)
+	}
+	// Approve and Comment go out (here: as a command, not run).
+	m.openSubmitMenu()
+	m.submitMenu.sel = 1
+	if cmd := m.submitMenuKey("enter"); cmd == nil {
+		t.Error("approve must send")
+	}
+	if m.submitMenu != nil {
+		t.Error("the menu closes after a choice")
+	}
+	// With nothing pending, a Comment verdict does nothing.
+	d.Files[0].Threads[0].Comments[1].Pending = false
+	m.openSubmitMenu()
+	m.submitMenu.sel = 0
+	if cmd := m.submitMenuKey("enter"); cmd != nil {
+		t.Error("nothing pending: nothing to submit")
+	}
+}

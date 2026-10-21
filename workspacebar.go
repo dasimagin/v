@@ -286,6 +286,15 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 	if y == toolbarRow {
 		if m.mode == modePick && m.picker != nil && m.picker.kind == "prdiff" {
 			right := m.w - lipgloss.Width(m.modeLabel()) - 2 // the gap before the view-mode button
+			sx, _ := m.submitMenuLayout()
+			if x >= sx && x < sx+lipgloss.Width(m.submitButton()) {
+				if m.submitMenu != nil {
+					m.submitMenu = nil
+				} else {
+					m.openSubmitMenu()
+				}
+				return true, nil
+			}
 			if x < right && x >= right-lipgloss.Width(m.listButton()) {
 				if m.listMenu != nil {
 					m.listMenu = nil
@@ -328,6 +337,15 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 				return true, nil
 			}
 		}
+	}
+	if m.submitMenu != nil {
+		left, width := m.submitMenuLayout()
+		if i := y - toolbarRow - 1; i >= 0 && i < len(verdicts) && x >= left && x < left+width {
+			m.submitMenu.sel = i
+			return true, m.submitMenuKey("enter")
+		}
+		m.submitMenu = nil
+		return true, nil
 	}
 	if m.listMenu != nil {
 		left, width := m.listMenuLayout()
@@ -379,6 +397,17 @@ func (m *model) overlayMenus(view string) string {
 		x, _ := m.repoMenuLayout()
 		for i, line := range m.renderRepoMenu() {
 			put(x, m.repoMenuTop()+i, line)
+		}
+	}
+	if m.submitMenu != nil {
+		x, width := m.submitMenuLayout()
+		for i, v := range verdicts {
+			mark, st := "  ", bg.Background(lipgloss.Color(cur.Panel)).Foreground(lipgloss.Color(cur.Fg))
+			if i == m.submitMenu.sel {
+				mark, st = "› ", buttonStyle
+			}
+			text := truncate(mark+v.label, width)
+			put(x, toolbarRow+1+i, st.Render(text+strings.Repeat(" ", max(width-lipgloss.Width(text), 0))))
 		}
 	}
 	if m.listMenu != nil {

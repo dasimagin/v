@@ -24,7 +24,7 @@ func (m *model) header(title, info, button string) []string {
 		button = st.Render(m.modeLabel())
 	}
 	if m.mode == modePick && m.picker != nil && m.picker.kind == "prdiff" {
-		button = m.listButton() + bg.Render(" ") + button
+		button = m.submitButton() + bg.Render(" ") + m.listButton() + bg.Render(" ") + button
 	}
 	left := bg.Render(" ") + brand() + bg.Render("   ") + title
 	if info != "" {

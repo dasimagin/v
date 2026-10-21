@@ -205,6 +205,22 @@ var options = []option{
 			return nil
 		},
 	},
+	{
+		label:  "Comments on the PR screen",
+		desc:   "Pending: replies and comments you write wait in your pending review until you submit it from the header. Immediate: each one is published at once",
+		values: func(*model) []string { return []string{"Pending review", "Publish immediately"} },
+		get: func(m *model) int {
+			if m.settings.PRComments == "immediate" {
+				return 1
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.PRComments = []string{"pending", "immediate"}[i]
+			applyPRSettings(m.settings)
+			return nil
+		},
+	},
 }
 
 // contextIndex is the dropdown entry closest to n lines of context.

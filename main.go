@@ -75,11 +75,12 @@ type model struct {
 
 	listen tea.Cmd // listens to the agent started at launch
 
-	vmode    viewMode  // flat or diff, kept across files
-	rmode    viewMode  // the same for reviews of agent edits
-	viewMenu *viewMenu // open view-mode dropdown
-	listMenu *viewMenu // open Files/Comments dropdown of the PR screen
-	stack    []screen  // screens to return to with Esc
+	vmode      viewMode  // flat or diff, kept across files
+	rmode      viewMode  // the same for reviews of agent edits
+	viewMenu   *viewMenu // open view-mode dropdown
+	listMenu   *viewMenu // open Files/Comments dropdown of the PR screen
+	submitMenu *viewMenu // open verdict dropdown (Comment, Approve, Request changes, Discard)
+	stack      []screen  // screens to return to with Esc
 
 	exitKey string // "ctrl+c" or "ctrl+d" after the first press; a second one quits
 	exitSeq int    // invalidates stale disarm ticks
@@ -207,6 +208,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prResolvedMsg:
 		m.onPRResolved(msg)
 		return m, nil
+	case prSubmitMsg:
+		return m, m.onPRSubmitted(msg)
 	case prDeletedMsg:
 		return m, m.onPRDeleted(msg)
 	case prComposedMsg:
@@ -271,6 +274,9 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.listMenu != nil {
 		m.listMenuKey(k)
 		return m, nil
+	}
+	if m.submitMenu != nil {
+		return m, m.submitMenuKey(k)
 	}
 	if k == "ctrl+t" {
 		m.openViewMenu()
@@ -657,6 +663,7 @@ func main() {
 	}
 	applyTheme(t)
 	applyDiffSettings(s)
+	applyPRSettings(s)
 	m := newModel()
 	m.workdir = dir
 	m.settings = s

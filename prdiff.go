@@ -59,6 +59,7 @@ type prData struct {
 	Draft                                 bool
 	Labels                                []string
 	Viewer                                string // your login: the comments by it can be deleted
+	NodeID                                string // GraphQL id of the PR, to start a review
 	At                                    int64
 }
 
@@ -180,6 +181,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 		Data struct {
 			Repository struct {
 				PullRequest struct {
+					ID            string
 					ReviewThreads struct{ Nodes []threadNode }
 				}
 			}
@@ -188,6 +190,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 	if err := json.Unmarshal(threads, &res); err != nil {
 		return nil, err
 	}
+	d.NodeID = res.Data.Repository.PullRequest.ID
 	for _, t := range res.Data.Repository.PullRequest.ReviewThreads.Nodes {
 		th := prThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Line: t.Line, Start: t.StartLine}
 		for _, c := range t.Comments.Nodes {
@@ -203,7 +206,7 @@ func parsePR(repo, url string, view, diff, threads []byte) (*prData, error) {
 }
 
 // threadsQuery reads the review threads of a PR: their state and every comment.
-const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id databaseId author{login} body createdAt state}}}}}}}`
+const threadsQuery = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){id reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id databaseId author{login} body createdAt state}}}}}}}`
 
 type threadNode struct {
 	ID         string
@@ -356,7 +359,7 @@ func (d *prData) conversationPreview(width int) (previewLines, map[int][]prHit) 
 		state += ", draft"
 	}
 	title := bg.Render("  ") + fgStyle.Bold(true).Render(d.Title)
-	button := commentButton.Render(" New comment ")
+	button := commentButton.Render(generalButtonLabel())
 	title += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(title)-lipgloss.Width(button), 1))) + button
 	out := previewLines{
 		rawLine(title),
@@ -366,6 +369,15 @@ func (d *prData) conversationPreview(width int) (previewLines, map[int][]prHit) 
 	}
 	for _, l := range markdownBody(d.Body, width-2) {
 		out = append(out, rawLine(bg.Render("  ")+l))
+	}
+	if text := strings.TrimSpace(reviewSummaries[d.URL]); text != "" && !immediateComments {
+		who := d.Viewer
+		if who == "" {
+			who = "you"
+		}
+		out = append(out, nil)
+		box, _ := messageBox([]boxEntry{{author: who, body: text, badges: []badge{{"review summary · sent with Submit", bg.Foreground(lipgloss.Color(cur.Type)).Bold(true)}}}}, false, width, "")
+		out = append(out, box...)
 	}
 	for _, r := range d.Reviews {
 		if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {
@@ -435,7 +447,7 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 			}
 		}
 	}
-	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d", d.At, value, width, d.Number, diffBefore, diffAfter)
+	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d:%v", d.At, value, width, d.Number, diffBefore, diffAfter, immediateComments)
 	if fileAt >= 0 && fileAt < len(d.Files) {
 		f := d.Files[fileAt]
 		lines := cachedPreview(key, 0, func() previewLines {
@@ -466,7 +478,7 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 		}
 		return lines
 	}
-	button := lipgloss.Width(commentButton.Render(" New comment "))
+	button := lipgloss.Width(commentButton.Render(generalButtonLabel()))
 	p.hits[0] = []prHit{{x0: width - 1 - button, x1: width - 1, kind: "general"}}
 	lines := cachedPreview(key, 0, func() previewLines {
 		lines, hits := d.conversationPreview(width)
@@ -477,4 +489,13 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 		p.hits[row] = append(p.hits[row], hs...)
 	}
 	return lines
+}
+
+// generalButtonLabel names the button in Conversation: a comment on the PR, or
+// the summary of the review being prepared.
+func generalButtonLabel() string {
+	if immediateComments {
+		return " New comment "
+	}
+	return " Review summary "
 }

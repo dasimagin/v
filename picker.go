@@ -104,7 +104,7 @@ func (m *model) closePicker(clear bool) {
 	if m.mode == modePick {
 		m.pop()
 	}
-	m.listMenu = nil
+	m.listMenu, m.submitMenu = nil, nil
 	m.picker = nil
 	if clear {
 		m.omni.SetValue("")
@@ -354,6 +354,9 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 			return m.startCompose("reply")
 		case "ctrl+n":
 			return m.startCompose("new")
+		case "ctrl+s":
+			m.openSubmitMenu()
+			return nil
 		case "ctrl+a":
 			if len(p.items) == 0 {
 				return nil
@@ -725,7 +728,7 @@ func (m *model) setPRList(list string) {
 
 // openListMenu drops the Files/Comments menu below its header button.
 func (m *model) openListMenu() {
-	m.repoMenu, m.menu, m.viewMenu = nil, nil, nil
+	m.repoMenu, m.menu, m.viewMenu, m.submitMenu = nil, nil, nil, nil
 	sel := 0
 	if m.picker.list == "comments" {
 		sel = 1

@@ -821,3 +821,39 @@ func TestBottomLineAndHelp(t *testing.T) {
 		t.Errorf("compose help: %q", title)
 	}
 }
+
+func TestBrandShimmers(t *testing.T) {
+	for x, want := range map[float64]float64{0: 0, 0.25: 0.25, 1: 1, 1.25: 0.75, 2: 0, 2.5: 0.5, -0.5: 0.5} {
+		if got := triangle(x); got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("triangle(%v) = %v, want %v", x, got, want)
+		}
+	}
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	a, b := brandAt(0), brandAt(0.4)
+	if a == b {
+		t.Error("the colors must move with the phase")
+	}
+	if ansi.Strip(a) != "Vibing…" || ansi.Strip(b) != "Vibing…" {
+		t.Errorf("the word must stay: %q %q", ansi.Strip(a), ansi.Strip(b))
+	}
+
+	m := newModel()
+	m.settings = defaultSettings()
+	if !m.settings.Animate {
+		t.Fatal("animation is on by default")
+	}
+	brandPhase = 0
+	next, cmd := m.Update(brandTickMsg{})
+	if brandPhase != brandStep || cmd == nil {
+		t.Errorf("a tick must advance the phase and keep going: phase=%v cmd=%v", brandPhase, cmd)
+	}
+	m = next.(model)
+	m.settings.Animate = false
+	m.Update(brandTickMsg{})
+	if brandPhase != brandStep {
+		t.Error("with animations off the phase stands still")
+	}
+	brandPhase = 0
+}

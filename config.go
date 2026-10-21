@@ -221,6 +221,21 @@ var options = []option{
 			return nil
 		},
 	},
+	{
+		label:  "Animations",
+		desc:   "The brand in the header shimmers; turn it off for a still screen",
+		values: func(*model) []string { return []string{"On", "Off"} },
+		get: func(m *model) int {
+			if m.settings.Animate {
+				return 0
+			}
+			return 1
+		},
+		set: func(m *model, i int) error {
+			m.settings.Animate = i == 0
+			return nil
+		},
+	},
 }
 
 // contextIndex is the dropdown entry closest to n lines of context.

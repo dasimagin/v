@@ -120,7 +120,7 @@ type disarmMsg int
 var keyNames = map[string]string{"ctrl+c": "Ctrl-C", "ctrl+d": "Ctrl-D"}
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.listen, repositoryCommand(m.workdir, m.repoSeq, true), repositoryTick())
+	return tea.Batch(textinput.Blink, m.listen, repositoryCommand(m.workdir, m.repoSeq, true), repositoryTick(), brandTick(m.settings.Animate))
 }
 
 const placeholder = "type / for commands"
@@ -215,6 +215,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case prSubmitMsg:
 		return m, m.onPRSubmitted(msg)
+	case brandTickMsg:
+		if m.settings.Animate {
+			brandPhase += brandStep
+		}
+		return m, brandTick(m.settings.Animate)
 	case prDeletedMsg:
 		return m, m.onPRDeleted(msg)
 	case prComposedMsg:

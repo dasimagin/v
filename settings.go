@@ -15,6 +15,7 @@ type Settings struct {
 	Effort string `json:"effort"` // Claude Code --effort
 
 	ApplyMode  string `json:"apply_mode"`  // "manual": ask about every step; "auto": the agent applies, commits, pushes and replies on its own
+	Animate    bool   `json:"animate"`     // the brand shimmers
 	PRComments string `json:"pr_comments"` // "pending" (default): comments written on the PR screen wait in your pending review until you submit it; "immediate": they are published at once
 	ReviewMode string `json:"review_mode"` // "manual": accept each comment; "auto": post at once as a pending review
 
@@ -27,7 +28,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", Agent: "claude", DiffBefore: 3, DiffAfter: 3, ReviewMode: "manual", ApplyMode: "manual", PRComments: "pending", Animate: true}
 }
 
 // models are the choices for the agent's model, best first.

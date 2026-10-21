@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -16,6 +17,7 @@ type composeState struct {
 	kind   string // "reply", "line" or "general"
 	thread prThread
 	file   prFile
+	line   int // a line picked by clicking it; 0 when the text starts with the number
 	hint   string
 }
 
@@ -25,7 +27,34 @@ type prComposedMsg struct {
 	err  error
 }
 
+func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
+
 var lineComment = regexp.MustCompile(`^\s*(\d+)\s*[: ]\s*(.+)$`)
+
+// composeReply starts a reply in a thread.
+func (m *model) composeReply(file prFile, t prThread) tea.Cmd {
+	if len(t.Comments) == 0 {
+		return nil
+	}
+	return m.beginCompose(&composeState{kind: "reply", thread: t, file: file,
+		hint: fmt.Sprintf("reply to @%s in %s · enter sends it to GitHub · esc cancels", t.Comments[0].Author, file.Path)})
+}
+
+// composeLine starts a comment on one line of the new file.
+func (m *model) composeLine(file prFile, line int) tea.Cmd {
+	return m.beginCompose(&composeState{kind: "line", file: file, line: line,
+		hint: fmt.Sprintf("comment on %s:%d · enter sends it to GitHub · esc cancels", file.Path, line)})
+}
+
+func (m *model) composeGeneral() tea.Cmd {
+	return m.beginCompose(&composeState{kind: "general", hint: "new comment on the PR · enter sends it · esc cancels"})
+}
+
+func (m *model) beginCompose(c *composeState) tea.Cmd {
+	m.picker.compose = c
+	m.setOmni("")
+	return m.omni.Focus()
+}
 
 // startCompose begins a reply to the selected thread (ctrl+r) or a new
 // comment on the selected file, thread's file or the PR itself (ctrl+n).
@@ -50,24 +79,90 @@ func (m *model) startCompose(kind string) tea.Cmd {
 			}
 		}
 	}
-	c := &composeState{}
 	switch {
-	case kind == "reply" && thread != nil && len(thread.Comments) > 0:
-		c.kind, c.thread, c.file = "reply", *thread, *file
-		c.hint = fmt.Sprintf("reply to @%s in %s · enter sends it to GitHub · esc cancels", thread.Comments[0].Author, file.Path)
+	case kind == "reply" && thread != nil:
+		return m.composeReply(*file, *thread)
 	case kind == "reply":
-		m.flash("to reply, switch the list to Comments (ctrl+l) and select a thread")
+		m.flash("to reply, select a thread in the Comments list, or click Reply on it")
 		return nil
 	case file != nil:
-		c.kind, c.file = "line", *file
-		c.hint = fmt.Sprintf("new comment on %s · type `<line> <text>`, the line numbers are in the diff · enter sends it · esc cancels", file.Path)
-	default:
-		c.kind = "general"
-		c.hint = "new comment on the PR · enter sends it · esc cancels"
+		return m.beginCompose(&composeState{kind: "line", file: *file,
+			hint: fmt.Sprintf("new comment on %s · type `<line> <text>` (line numbers are in the diff), or click a line · enter sends it · esc cancels", file.Path)})
 	}
-	p.compose = c
-	m.setOmni("")
-	return m.omni.Focus()
+	return m.composeGeneral()
+}
+
+// previewClick handles a click in the PR preview: buttons on a thread, a diff
+// line (a comment on it), or the New comment button.
+func (m *model) previewClick(x, y int) tea.Cmd {
+	p := m.picker
+	if p.pr == nil || p.compose != nil {
+		return nil
+	}
+	rel := x - (m.pickerListWidth() + 1)
+	row := p.pscroll + y - headerRows
+	for _, h := range p.hits[row] {
+		if rel < h.x0 || rel >= h.x1 {
+			continue
+		}
+		switch h.kind {
+		case "general":
+			return m.composeGeneral()
+		case "line":
+			return m.composeLine(p.pr.Files[h.file], h.line)
+		case "reply":
+			return m.composeReply(p.pr.Files[h.file], p.pr.Files[h.file].Threads[h.thread])
+		case "resolve":
+			return m.toggleThread(h.file, h.thread)
+		}
+	}
+	return nil
+}
+
+type prResolvedMsg struct {
+	thread   string
+	resolved bool
+	err      error
+}
+
+// toggleThread resolves or reopens a thread. The button flips at once and
+// flips back if GitHub refuses.
+func (m *model) toggleThread(fi, ti int) tea.Cmd {
+	p := m.picker
+	t := &p.pr.Files[fi].Threads[ti]
+	if t.ID == "" {
+		return nil
+	}
+	target := !t.Resolved
+	t.Resolved = target
+	p.pr.At = time.Now().UnixNano() // drops the cached previews
+	m.rebuildPicker()
+	dir, id := m.repo.Root, t.ID
+	query := `mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{id}}}`
+	if target {
+		query = `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id}}}`
+	}
+	return func() tea.Msg {
+		_, err := ghGraphQL(dir, query, map[string]any{"id": id})
+		return prResolvedMsg{id, target, err}
+	}
+}
+
+func (m *model) onPRResolved(msg prResolvedMsg) {
+	p := m.picker
+	if p == nil || p.kind != "prdiff" || p.pr == nil || msg.err == nil {
+		return
+	}
+	for fi := range p.pr.Files {
+		for ti := range p.pr.Files[fi].Threads {
+			if t := &p.pr.Files[fi].Threads[ti]; t.ID == msg.thread {
+				t.Resolved = !msg.resolved
+			}
+		}
+	}
+	p.pr.At = time.Now().UnixNano()
+	m.rebuildPicker()
+	m.setErr(msg.err.Error())
 }
 
 // composeKey drives the omnibox while a comment is being written.
@@ -104,17 +199,20 @@ func (m *model) sendCompose() tea.Cmd {
 			return err
 		}
 	case "line":
-		mt := lineComment.FindStringSubmatch(text)
-		if mt == nil {
-			m.setErr("start with the line number, like `42 text`")
-			return nil
+		line, comment := c.line, text
+		if line == 0 {
+			mt := lineComment.FindStringSubmatch(text)
+			if mt == nil {
+				m.setErr("start with the line number, like `42 text`")
+				return nil
+			}
+			line, comment = atoi(mt[1]), strings.TrimSpace(mt[2])
 		}
-		line, _ := strconv.Atoi(mt[1])
 		if !c.file.newLines()[line] {
 			m.setErr(fmt.Sprintf("line %d is not in the diff of %s", line, c.file.Path))
 			return nil
 		}
-		body, _ := json.Marshal(map[string]any{"body": strings.TrimSpace(mt[2]), "commit_id": d.HeadSHA, "path": c.file.Path, "line": line, "side": "RIGHT"})
+		body, _ := json.Marshal(map[string]any{"body": comment, "commit_id": d.HeadSHA, "path": c.file.Path, "line": line, "side": "RIGHT"})
 		post = func() error {
 			_, err := ghInput(dir, body, "api", "--method", "POST", "--input", "-", fmt.Sprintf("repos/%s/pulls/%d/comments", d.Repo, d.Number))
 			return err

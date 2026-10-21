@@ -58,6 +58,18 @@ func markdown(text string, width int) []string {
 	return lines
 }
 
+// markdownOn renders markdown on a block of the panel color: every line is
+// padded to width, so the tint forms a solid rectangle.
+func markdownOn(text string, width int) []string {
+	lines := markdown(text, width)
+	plain, tint := bgSeq(cur.Bg), bgSeq(cur.Panel)
+	for i, l := range lines {
+		l = strings.ReplaceAll(l, plain, tint)
+		lines[i] = l + bgSeq(cur.Panel) + strings.Repeat(" ", max(width-xansi.StringWidth(l), 0)) + "\x1b[0m"
+	}
+	return lines
+}
+
 // bgSeq is the escape sequence that sets a "#rrggbb" background.
 func bgSeq(hex string) string {
 	v, _ := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)

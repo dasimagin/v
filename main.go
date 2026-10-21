@@ -151,6 +151,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if handled, cmd := m.workspaceClick(msg.X, msg.Y); handled {
 				return m, cmd
 			}
+			if m.mode == modePick && m.picker.kind == "prdiff" && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() && msg.X > m.pickerListWidth() {
+				return m, m.previewClick(msg.X, msg.Y)
+			}
 			if m.mode == modePick && msg.Y >= headerRows && msg.Y < headerRows+m.bodyRows() && msg.X < m.pickerListWidth() {
 				if i := m.picker.top + msg.Y - headerRows; i < len(m.picker.items) {
 					m.picker.sel = i
@@ -193,6 +196,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onRepository(msg)
 	case prDiffMsg:
 		return m, m.onPRDiff(msg)
+	case prResolvedMsg:
+		m.onPRResolved(msg)
+		return m, nil
 	case prComposedMsg:
 		return m, m.onPRComposed(msg)
 	case reviewEventMsg:
@@ -583,7 +589,7 @@ func (m model) hint() string {
 			if m.picker.compose != nil {
 				return "enter sends · esc cancels"
 			}
-			return "search · ctrl+r reply · ctrl+n new comment · ctrl+l files/comments · ↑↓ select · esc back"
+			return "search · click a thread button or a diff line, or ctrl+r reply · ctrl+n new · ctrl+e resolve · ctrl+l files/comments · ↑↓ select · esc back"
 		}
 		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
 	case m.repoMenu != nil:

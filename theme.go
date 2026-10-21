@@ -132,6 +132,7 @@ func applyTheme(t *Theme) {
 	selStyle = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Fg)).Bold(true)
 	buttonStyle = lipgloss.NewStyle().Background(c(t.Accent)).Foreground(c(t.Bg)).Bold(true)
 	buttonOpen = buttonStyle.Background(c(t.Accent2))
+	commentButton = bg.Background(c(t.Sel)).Foreground(c(t.Fg)).Bold(true)
 	buttonOff = lipgloss.NewStyle().Background(c(t.Sel)).Foreground(c(t.Muted))
 	gutterStyle = bg.Foreground(c(t.Gutter))
 	addTint = gradient(t.Added, t.Bg, 0.82)

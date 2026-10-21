@@ -132,21 +132,16 @@ func (m *model) renderLog(rows int) []string {
 					who = "Claude · reply"
 				}
 				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╭─ ") + frame.Bold(true).Render(who), bg})
-				mark, text := splitLevel(msg.text)
-				body := markdownBody(text, width-6)
-				if mark != "" {
-					st := frame.Bold(true)
-					if mark == "!!" {
-						st = bg.Foreground(c(cur.Deleted)).Bold(true)
-					}
-					if len(body) > 0 {
-						body[0] = st.Render(mark) + bg.Render(" ") + body[0]
-					} else {
-						body = []string{st.Render(mark)}
-					}
+				body := markdownOn(strings.TrimSpace(msg.text), width-8)
+				if len(body) == 0 {
+					body = []string{""}
 				}
+				if mark, _ := splitLevel(msg.text); mark != "" {
+					body[0] = colorMark(body[0], mark)
+				}
+				panel := bg.Background(c(cur.Panel))
 				for _, l := range body {
-					lines = append(lines, chatLine{dim.Render("│ "), frame.Render("│ ") + l, bg})
+					lines = append(lines, chatLine{dim.Render("│ "), frame.Render("│") + panel.Render(" ") + l + panel.Render(" "), bg})
 				}
 				lines = append(lines, chatLine{dim.Render("│ "), frame.Render("╰─"), bg})
 			}

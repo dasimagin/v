@@ -39,6 +39,7 @@ type workspacePicker struct {
 	list             string // "files" or "comments" on the left
 	focus            int    // row of the preview to bring into view
 	compose          *composeState
+	hits             map[int][]prHit // clickable spots in the PR preview, by row
 	seq              int
 }
 
@@ -349,6 +350,17 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 			return m.startCompose("reply")
 		case "ctrl+n":
 			return m.startCompose("new")
+		case "ctrl+e":
+			if len(p.items) == 0 {
+				return nil
+			}
+			if a, b, ok := strings.Cut(p.items[p.sel].value, ":"); ok {
+				fi, ti := atoi(a), atoi(b)
+				if p.pr != nil && fi < len(p.pr.Files) && ti < len(p.pr.Files[fi].Threads) {
+					return m.toggleThread(fi, ti)
+				}
+			}
+			return nil
 		}
 	}
 	switch msg.String() {

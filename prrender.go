@@ -13,7 +13,21 @@ import (
 // tokRaw marks a preview line that is already styled text, drawn as it is.
 const tokRaw chroma.TokenType = -1
 
+// commentButton styles the buttons that start a comment or reply.
+var commentButton lipgloss.Style
+
 func rawLine(s string) []seg { return []seg{{s, tokRaw}} }
+
+// colorMark recolors the importance mark ("!!" red, "!" accent) at the start
+// of a rendered comment line, and returns to the panel background after it.
+func colorMark(line, mark string) string {
+	color := cur.Accent
+	if mark == "!!" {
+		color = cur.Deleted
+	}
+	st := bg.Background(lipgloss.Color(cur.Panel)).Foreground(lipgloss.Color(color)).Bold(true)
+	return strings.Replace(line, mark, st.Render(mark)+bgSeq(cur.Panel), 1)
+}
 
 // markdownBody renders a comment as terminal lines, without the blank rows
 // around it.
@@ -45,7 +59,7 @@ type boxEntry struct {
 
 // messageBox draws messages in a rounded frame, replies indented under the
 // first message. The frame takes the muted color when quiet is set.
-func messageBox(entries []boxEntry, quiet bool, width int) previewLines {
+func messageBox(entries []boxEntry, quiet bool, width int, button string) previewLines {
 	frame := accentStyle
 	if quiet {
 		frame = hintStyle
@@ -64,9 +78,17 @@ func messageBox(entries []boxEntry, quiet bool, width int) previewLines {
 		for _, b := range e.badges {
 			head += b.render()
 		}
+		if i == 0 && button != "" { // right-aligned, so it is easy to find and click
+			head += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(head)-lipgloss.Width(button)-2, 1))) + button
+		}
 		out = append(out, rawLine(bg.Render("  ")+head))
-		for _, l := range markdownBody(e.body, width-6) {
-			out = append(out, rawLine(bg.Render("  ")+frame.Render("│ ")+l))
+		panel := bg.Background(lipgloss.Color(cur.Panel))
+		body := markdownOn(strings.TrimSpace(e.body), width-7)
+		if mark, _ := splitLevel(e.body); mark != "" && len(body) > 0 {
+			body[0] = colorMark(body[0], mark)
+		}
+		for _, l := range body {
+			out = append(out, rawLine(bg.Render("  ")+frame.Render("│")+panel.Render(" ")+l+panel.Render(" ")))
 		}
 	}
 	return append(out, rawLine(bg.Render("  ")+frame.Render("╰─")))
@@ -93,7 +115,40 @@ func threadBox(t prThread, width int) previewLines {
 		}
 		entries = append(entries, e)
 	}
-	return messageBox(entries, t.Resolved, width)
+	button := ""
+	if t.ID != "" {
+		reply, resolve := threadButtons(t)
+		button = reply + bg.Render(" ") + resolve
+	}
+	return messageBox(entries, t.Resolved, width, button)
+}
+
+// threadButtons are the Reply and Resolve (or Unresolve) buttons of a thread.
+func threadButtons(t prThread) (reply, resolve string) {
+	st := buttonStyle
+	if t.Resolved {
+		st = bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Fg)).Bold(true)
+	}
+	return bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Fg)).Bold(true).Render(" Reply "), st.Render(threadButtonLabel(t))
+}
+
+// threadHits are where those buttons sit in a preview of the given width,
+// relative to its left edge: they are right-aligned in the thread's header row.
+func threadHits(t prThread, width int) (reply, resolve [2]int) {
+	r, s := threadButtons(t)
+	rw, sw := lipgloss.Width(r), lipgloss.Width(s)
+	right := width - 1
+	resolve = [2]int{right - sw, right}
+	reply = [2]int{right - sw - 1 - rw, right - sw - 1}
+	return
+}
+
+// threadButtonLabel is the text of the resolve toggle of a thread.
+func threadButtonLabel(t prThread) string {
+	if t.Resolved {
+		return " Unresolve "
+	}
+	return " Resolve "
 }
 
 func (t prThread) summary() string {

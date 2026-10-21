@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -206,7 +207,7 @@ func TestPRPreviewPlacesComments(t *testing.T) {
 		t.Fatalf("parse: %+v %v", d, err)
 	}
 	var texts []string
-	lines, _ := d.filePreview(d.Files[0], 60)
+	lines, _, _ := d.filePreview(d.Files[0], 60)
 	for _, line := range lines {
 		s := ""
 		for _, g := range line {
@@ -277,5 +278,82 @@ func TestComposeOnThePRScreen(t *testing.T) {
 	m.startCompose("reply")
 	if c := m.picker.compose; c == nil || c.kind != "reply" || c.thread.ID != "T1" || !strings.Contains(c.hint, "@r") {
 		t.Fatalf("reply compose = %+v", m.picker.compose)
+	}
+}
+
+func TestClickingThreadButtonsAndDiffLines(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[],"headRefOid":"abc"}`
+	diff := "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n"
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":2,"comments":{"nodes":[` +
+		`{"databaseId":9,"author":{"login":"r"},"body":"why?","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(diff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel()
+	m.w, m.h, m.mode = 140, 40, modePick
+	m.repo = &repository{Root: t.TempDir()}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	m.picker.sel = 1 // f.go
+	lw := m.pickerListWidth()
+	m.pickerPreview() // fills the click map for this frame
+
+	find := func(kind string) (row int, h prHit) {
+		for r, hits := range m.picker.hits {
+			for _, x := range hits {
+				if x.kind == kind {
+					return r, x
+				}
+			}
+		}
+		t.Fatalf("no %s hit in %v", kind, m.picker.hits)
+		return
+	}
+	click := func(kind string) tea.Cmd {
+		row, h := find(kind)
+		return m.previewClick(lw+1+h.x0, headerRows+row-m.picker.pscroll)
+	}
+	// A diff line starts a comment on that line.
+	click("line")
+	if c := m.picker.compose; c == nil || c.kind != "line" || c.line == 0 {
+		t.Fatalf("line click: %+v", m.picker.compose)
+	}
+	m.picker.compose = nil
+	// Reply opens the composer on the thread.
+	click("reply")
+	if c := m.picker.compose; c == nil || c.kind != "reply" || c.thread.ID != "T1" {
+		t.Fatalf("reply click: %+v", m.picker.compose)
+	}
+	m.picker.compose = nil
+	// Resolve flips the thread at once and asks GitHub in the background.
+	if cmd := click("resolve"); cmd == nil || !d.Files[0].Threads[0].Resolved {
+		t.Fatalf("resolve click: cmd=%v resolved=%v", cmd, d.Files[0].Threads[0].Resolved)
+	}
+	m.onPRResolved(prResolvedMsg{thread: "T1", resolved: true, err: fmt.Errorf("denied")})
+	if d.Files[0].Threads[0].Resolved {
+		t.Error("a refused resolve must flip back")
+	}
+	// Clicking elsewhere does nothing.
+	if cmd := m.previewClick(lw+1, headerRows+500); cmd != nil || m.picker.compose != nil {
+		t.Error("a click on nothing must do nothing")
+	}
+	// The conversation has its own New comment button.
+	m.picker.sel = 0
+	m.pickerPreview()
+	row, h := find("general")
+	m.previewClick(lw+1+h.x0, headerRows+row)
+	if c := m.picker.compose; c == nil || c.kind != "general" {
+		t.Fatalf("general click: %+v", m.picker.compose)
+	}
+}
+
+func TestCommentBodyIsTinted(t *testing.T) {
+	lines := markdownOn("hello `code`", 20)
+	if len(lines) != 1 || !strings.Contains(lines[0], bgSeq(cur.Panel)) || strings.Contains(lines[0], bgSeq(cur.Bg)) {
+		t.Errorf("not tinted: %q", lines)
+	}
+	if w := ansi.StringWidth(lines[0]); w != 20 {
+		t.Errorf("width = %d, want a solid block of 20", w)
 	}
 }

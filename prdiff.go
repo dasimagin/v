@@ -249,7 +249,8 @@ func wrapped(text string, width int) []string {
 // filePreview is the file's patch, with a gutter of new-file line numbers and
 // each review thread under the line it belongs to. anchors holds the row of
 // every thread, by its index in f.Threads.
-func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
+func (d *prData) filePreview(f prFile, width int) (previewLines, []int, map[int]int) {
+	lineAt := map[int]int{} // row of each numbered diff line -> its line in the new file
 	byLine := map[int][]int{}
 	var loose []int
 	for i, t := range f.Threads {
@@ -292,6 +293,9 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
 		if l != "" {
 			line = append(line, seg{l, tok})
 		}
+		if no > 0 {
+			lineAt[len(out)] = no
+		}
 		out = append(out, line)
 		for _, i := range byLine[no] {
 			anchors[i] = len(out)
@@ -305,7 +309,7 @@ func (d *prData) filePreview(f prFile, width int) (previewLines, []int) {
 			out = append(out, threadBox(f.Threads[i], width)...)
 		}
 	}
-	return out, anchors
+	return out, anchors, lineAt
 }
 
 // conversationPreview is the PR itself: description, reviews and general comments.
@@ -314,8 +318,11 @@ func (d *prData) conversationPreview(width int) previewLines {
 	if d.Draft {
 		state += ", draft"
 	}
+	title := bg.Render("  ") + fgStyle.Bold(true).Render(d.Title)
+	button := commentButton.Render(" New comment ")
+	title += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(title)-lipgloss.Width(button), 1))) + button
 	out := previewLines{
-		rawLine(bg.Render("  ") + fgStyle.Bold(true).Render(d.Title)),
+		rawLine(title),
 		rawLine(bg.Render("  ") + hintStyle.Render(fmt.Sprintf("#%d by @%s · %s · %s ← %s · %d files", d.Number, d.Author, state, d.Base, d.Head, len(d.Files)))),
 		rawLine(bg.Render("  ") + hintStyle.Render(d.URL)),
 		nil,
@@ -336,17 +343,30 @@ func (d *prData) conversationPreview(width int) previewLines {
 		}
 		label := strings.ToLower(strings.ReplaceAll(r.State, "_", " "))
 		out = append(out, nil)
-		out = append(out, messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width)...)
+		out = append(out, messageBox([]boxEntry{{author: r.Author, at: r.At, body: r.Body, badges: []badge{{label, color}}}}, false, width, "")...)
 	}
 	for _, c := range d.Comments {
 		out = append(out, nil)
-		out = append(out, messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width)...)
+		out = append(out, messageBox([]boxEntry{{author: c.Author, at: c.At, body: c.Body}}, false, width, "")...)
 	}
 	return out
 }
 
-// prAnchors remembers where each comment sits in a cached file preview.
-var prAnchors = map[string][]int{}
+// prAnchors remembers where each thread sits in a cached file preview, and
+// prLineRows where each numbered diff line does.
+var (
+	prAnchors  = map[string][]int{}
+	prLineRows = map[string]map[int]int{}
+)
+
+// prHit is a clickable spot in the preview: columns [x0, x1) of a row.
+type prHit struct {
+	x0, x1 int
+	kind   string // "reply", "resolve", "line" or "general"
+	file   int
+	thread int
+	line   int
+}
 
 // prPreview builds the right pane for one list item: "" is the conversation,
 // "summary" the draft review text, "f:c" comment c of file f, else a path.
@@ -354,6 +374,7 @@ var prAnchors = map[string][]int{}
 func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	d := p.pr
 	p.focus = 0
+	p.hits = map[int][]prHit{}
 	if d == nil {
 		return nil
 	}
@@ -370,16 +391,31 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 	}
 	key := fmt.Sprintf("pr:%d:%s:%d:%d:%d:%d", d.At, value, width, d.Number, diffBefore, diffAfter)
 	if fileAt >= 0 && fileAt < len(d.Files) {
+		f := d.Files[fileAt]
 		lines := cachedPreview(key, 0, func() previewLines {
-			lines, anchors := d.filePreview(d.Files[fileAt], width)
-			prAnchors[key] = anchors
+			lines, anchors, lineAt := d.filePreview(f, width)
+			prAnchors[key], prLineRows[key] = anchors, lineAt
 			return lines
 		})
-		if anchors := prAnchors[key]; commentAt >= 0 && commentAt < len(anchors) {
+		anchors := prAnchors[key]
+		if commentAt >= 0 && commentAt < len(anchors) {
 			p.focus = anchors[commentAt]
+		}
+		for row, line := range prLineRows[key] {
+			p.hits[row] = append(p.hits[row], prHit{x0: 0, x1: width, kind: "line", file: fileAt, line: line})
+		}
+		for ti, row := range anchors {
+			if t := f.Threads[ti]; t.ID != "" {
+				reply, resolve := threadHits(t, width)
+				p.hits[row] = append(p.hits[row],
+					prHit{x0: reply[0], x1: reply[1], kind: "reply", file: fileAt, thread: ti},
+					prHit{x0: resolve[0], x1: resolve[1], kind: "resolve", file: fileAt, thread: ti})
+			}
 		}
 		return lines
 	}
+	button := lipgloss.Width(commentButton.Render(" New comment "))
+	p.hits[0] = []prHit{{x0: width - 1 - button, x1: width - 1, kind: "general"}}
 	return cachedPreview(key, 0, func() previewLines {
 		return d.conversationPreview(width)
 	})

@@ -261,7 +261,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // from a session that /reset closed
 		}
 		m.onEvent(msg.e)
-		next := m.agent.wait()
+		var next tea.Cmd
+		if m.agent != nil && m.agent == msg.a { // handling the event may have ended the session
+			next = m.agent.wait()
+		}
 		if m.deferred != nil {
 			next, m.deferred = tea.Batch(next, m.deferred), nil
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -95,7 +96,7 @@ func reviewPrompt(d *prData) string {
 
 // runClaudeReview asks Claude Code for a one-shot, read-only review. It does
 // not touch the chat session; the PR text goes in on stdin.
-func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData) (reviewResult, error) {
+func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData, emit func(ev)) (reviewResult, error) {
 	model := s.Model
 	if env := os.Getenv("V_CLAUDE_MODEL"); env != "" {
 		model = env
@@ -103,7 +104,8 @@ func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData) (re
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "claude", "-p",
-		"--output-format", "json",
+		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
+		"--thinking-display", "summarized", // without it thinking blocks come empty
 		"--no-session-persistence",
 		"--allowedTools", "Read,Grep,Glob",
 		"--append-system-prompt", reviewSystemPrompt,
@@ -118,14 +120,38 @@ func runClaudeReview(ctx context.Context, dir string, s Settings, d *prData) (re
 	cmd.Stdin = strings.NewReader(reviewPrompt(d))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return reviewResult{}, err
+	}
+	if err := cmd.Start(); err != nil {
+		return reviewResult{}, fmt.Errorf("start claude: %w", err)
+	}
+	// Thinking and tool calls stream to the chat; the last "result" line holds the findings.
+	var final []byte
+	sc := bufio.NewScanner(pipe)
+	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	for sc.Scan() {
+		var msg claudeMsg
+		if json.Unmarshal(sc.Bytes(), &msg) != nil {
+			continue
+		}
+		if msg.Type == "result" {
+			final = append([]byte(nil), sc.Bytes()...)
+			continue
+		}
+		for _, e := range claudeEvents(msg, dir) {
+			emit(e)
+		}
+	}
+	_ = cmd.Wait()
 	if ctx.Err() != nil {
 		return reviewResult{}, fmt.Errorf("review stopped")
 	}
-	if err != nil && len(out) == 0 {
-		return reviewResult{}, fmt.Errorf("claude: %s", firstOutputLine(stderr.String(), err))
+	if final == nil {
+		return reviewResult{}, fmt.Errorf("claude: %s", firstOutputLine(stderr.String(), fmt.Errorf("no result")))
 	}
-	return parseReview(out)
+	return parseReview(final)
 }
 
 // parseReview reads `claude -p --output-format json`: the structured answer
@@ -338,6 +364,18 @@ type reviewFlow struct {
 	next           int // the card waiting for an answer
 	cancel         func()
 	running        bool
+	out            chan tea.Msg
+}
+
+// wait is the command that delivers the next message of the running review.
+func (rv *reviewFlow) wait() tea.Cmd {
+	return func() tea.Msg { return <-rv.out }
+}
+
+// reviewEventMsg carries what the reviewer does (thinking, reading files) to the chat.
+type reviewEventMsg struct {
+	flow *reviewFlow
+	e    ev
 }
 
 type reviewDoneMsg struct {
@@ -403,14 +441,45 @@ func (m *model) cmdReview(arg string) tea.Cmd {
 	m.showChat()
 	m.note("Claude is reviewing " + prLabel(*pr) + " · esc stops")
 	s := m.settings
-	return func() tea.Msg {
+	rv.out = make(chan tea.Msg, 256)
+	go func() {
 		d, err := fetchPR(rv.dir, rv.url)
 		if err != nil {
-			return reviewDoneMsg{flow: rv, err: err}
+			rv.out <- reviewDoneMsg{flow: rv, err: err}
+			return
 		}
-		res, err := runClaudeReview(ctx, rv.dir, s, d)
-		return reviewDoneMsg{rv, d, res, err}
+		res, err := runClaudeReview(ctx, rv.dir, s, d, func(e ev) { rv.out <- reviewEventMsg{rv, e} })
+		rv.out <- reviewDoneMsg{rv, d, res, err}
+	}()
+	return rv.wait()
+}
+
+// onReviewEvent shows the reviewer's thinking and tool calls in the chat; its
+// final answer is the findings, not chat text.
+func (m *model) onReviewEvent(msg reviewEventMsg) tea.Cmd {
+	rv := msg.flow
+	if rv != m.rv || !rv.running {
+		return nil
 	}
+	last := func() *message {
+		if n := len(m.log); n > 0 && m.log[n-1].kind == msgThinking {
+			return &m.log[n-1]
+		}
+		return nil
+	}
+	switch e := msg.e; e.kind {
+	case evThinkingStart:
+		m.log = append(m.log, message{kind: msgThinking})
+	case evThinking:
+		if l := last(); l != nil {
+			l.text += e.text
+		}
+	case evTool:
+		if !strings.HasPrefix(e.text, "StructuredOutput") {
+			m.log = append(m.log, message{kind: msgTool, text: e.text})
+		}
+	}
+	return rv.wait()
 }
 
 // showChat brings the chat forward, where review comments appear.

@@ -59,13 +59,16 @@ type boxEntry struct {
 
 // boxHits are the clickable spots in the header row of a box, as columns
 // [x0, x1) from the left edge of the preview.
-type boxHits struct{ state, reply [2]int }
+type boxHits struct {
+	state [2]int
+	btn   [][2]int // the right-aligned buttons, in order
+}
 
 // messageBox draws messages in a rounded frame, replies indented under the
 // first message. The frame takes the muted color when quiet is set. The first
 // header can carry a state button after its badges and a button at the right
 // edge; their positions are returned.
-func messageBox(entries []boxEntry, quiet bool, width int, state, button string) (previewLines, boxHits) {
+func messageBox(entries []boxEntry, quiet bool, width int, state string, buttons ...string) (previewLines, boxHits) {
 	frame := accentStyle
 	if quiet {
 		frame = hintStyle
@@ -91,10 +94,17 @@ func messageBox(entries []boxEntry, quiet bool, width int, state, button string)
 			head += state
 			hits.state = [2]int{x0, 2 + lipgloss.Width(head)}
 		}
-		if i == 0 && button != "" { // right-aligned, so it is easy to find and click
-			head += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(head)-lipgloss.Width(button)-2, 1))) + button
-			right := 2 + lipgloss.Width(head)
-			hits.reply = [2]int{right - lipgloss.Width(button), right}
+		if i == 0 && len(buttons) > 0 { // right-aligned, so they are easy to find and click
+			group := strings.Join(buttons, bg.Render(" "))
+			head += bg.Render(strings.Repeat(" ", max(width-1-lipgloss.Width(head)-lipgloss.Width(group)-2, 1)))
+			for j, b := range buttons {
+				if j > 0 {
+					head += bg.Render(" ")
+				}
+				x0 := 2 + lipgloss.Width(head)
+				head += b
+				hits.btn = append(hits.btn, [2]int{x0, 2 + lipgloss.Width(head)})
+			}
 		}
 		out = append(out, rawLine(bg.Render("  ")+head))
 		panel := bg.Background(lipgloss.Color(cur.Panel))
@@ -126,12 +136,16 @@ func threadBox(t prThread, width int) (previewLines, boxHits) {
 		}
 		entries = append(entries, e)
 	}
-	state, reply := "", ""
+	var state string
+	var buttons []string
 	if t.ID != "" {
 		state = stateButton(t)
-		reply = replyButton()
+		buttons = append(buttons, replyButton())
+		if !t.Resolved {
+			buttons = append(buttons, applyButton())
+		}
 	}
-	return messageBox(entries, t.Resolved, width, state, reply)
+	return messageBox(entries, t.Resolved, width, state, buttons...)
 }
 
 // stateButton shows whether a thread is resolved; clicking it flips that.
@@ -140,6 +154,11 @@ func stateButton(t prThread) string {
 		return bg.Background(lipgloss.Color(cur.Sel)).Foreground(lipgloss.Color(cur.Added)).Bold(true).Render(" ✓ resolved ")
 	}
 	return buttonStyle.Render(" ○ unresolved ")
+}
+
+// applyButton hands a thread to the agent to fix.
+func applyButton() string {
+	return buttonStyle.Render(" Apply ")
 }
 
 func replyButton() string {

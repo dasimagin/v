@@ -352,6 +352,15 @@ func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 			return m.startCompose("reply")
 		case "ctrl+n":
 			return m.startCompose("new")
+		case "ctrl+a":
+			if len(p.items) == 0 {
+				return nil
+			}
+			if a, b, ok := strings.Cut(p.items[p.sel].value, ":"); ok {
+				return m.applyThread(atoi(a), atoi(b))
+			}
+			m.flash("select a thread in the Comments list, or click Apply on it")
+			return nil
 		case "ctrl+e":
 			if len(p.items) == 0 {
 				return nil

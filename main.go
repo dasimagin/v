@@ -197,6 +197,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onRepository(msg)
 	case prDiffMsg:
 		return m, m.onPRDiff(msg)
+	case applyReadyMsg:
+		return m, m.onApplyReady(msg)
 	case prResolvedMsg:
 		m.onPRResolved(msg)
 		return m, nil
@@ -594,7 +596,7 @@ func (m model) hint() string {
 			if m.picker.compose != nil {
 				return "enter sends · esc cancels"
 			}
-			return "search · click a thread button or a diff line, or ctrl+r reply · ctrl+n new · ctrl+e resolve · ctrl+l files/comments · ↑↓ select · esc back"
+			return "search · click a button or a diff line · ctrl+r reply · ctrl+a apply · ctrl+n new · ctrl+e resolve · ctrl+l files/comments · ↑↓ select · esc back"
 		}
 		return "type to search · tab cycle · ↑↓ select · enter switch · shift+↑↓ scroll history · esc back"
 	case m.repoMenu != nil:

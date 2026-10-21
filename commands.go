@@ -36,6 +36,9 @@ var commands = []*Command{
 		Name: "show", Desc: "Browse this branch's history", Run: (*model).cmdShow,
 	},
 	{
+		Name: "apply", Desc: "Have the agent fix the open review threads of this PR", Run: (*model).cmdApply,
+	},
+	{
 		Name: "review", Args: "[make | submit | discard]", Desc: "Pending review status; make runs a Claude review, submit or discard its pending review", Run: (*model).cmdReview,
 	},
 	{

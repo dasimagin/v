@@ -139,6 +139,8 @@ func (m *model) previewClick(x, y int) tea.Cmd {
 			return m.composeReply(p.pr.Files[h.file], p.pr.Files[h.file].Threads[h.thread])
 		case "resolve":
 			return m.toggleThread(h.file, h.thread)
+		case "apply":
+			return m.applyThread(h.file, h.thread)
 		}
 	}
 	return nil

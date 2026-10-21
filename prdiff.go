@@ -435,9 +435,12 @@ func (p *workspacePicker) prPreview(value string, width int) previewLines {
 		}
 		for ti, row := range anchors {
 			if t, h := f.Threads[ti], prBoxHits[key][ti]; t.ID != "" {
-				p.hits[row] = append(p.hits[row],
-					prHit{x0: h.reply[0], x1: h.reply[1], kind: "reply", file: fileAt, thread: ti},
-					prHit{x0: h.state[0], x1: h.state[1], kind: "resolve", file: fileAt, thread: ti})
+				p.hits[row] = append(p.hits[row], prHit{x0: h.state[0], x1: h.state[1], kind: "resolve", file: fileAt, thread: ti})
+				for bi, kind := range []string{"reply", "apply"} {
+					if bi < len(h.btn) {
+						p.hits[row] = append(p.hits[row], prHit{x0: h.btn[bi][0], x1: h.btn[bi][1], kind: kind, file: fileAt, thread: ti})
+					}
+				}
 			}
 		}
 		return lines

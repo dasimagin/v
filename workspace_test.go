@@ -528,3 +528,50 @@ func TestAgentCommentRange(t *testing.T) {
 		t.Errorf("label = %q", rv.cards[0].label)
 	}
 }
+
+func TestApplyPromptAndButton(t *testing.T) {
+	view := `{"number":7,"title":"T","body":"b","state":"OPEN","author":{"login":"a"},"reviews":[],"comments":[],"headRefName":"feat","baseRefName":"main"}`
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[` +
+		`{"id":"T1","isResolved":false,"isOutdated":false,"path":"f.go","line":4,"startLine":2,"comments":{"nodes":[{"databaseId":9,"author":{"login":"r"},"body":"extract this block","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"},{"databaseId":10,"author":{"login":"a"},"body":"why?","createdAt":"2026-01-02T00:00:00Z","state":"SUBMITTED"}]}},` +
+		`{"id":"T2","isResolved":true,"isOutdated":false,"path":"f.go","line":3,"comments":{"nodes":[{"databaseId":11,"author":{"login":"r"},"body":"done thing","createdAt":"2026-01-01T00:00:00Z","state":"SUBMITTED"}]}}]}}}}}`
+	d, err := parsePR("o/r", "https://github.com/o/r/pull/7", []byte(view), []byte(rangeDiff), []byte(threads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := d.unresolvedThreads()
+	if len(refs) != 1 || refs[0].thread.ID != "T1" {
+		t.Fatalf("unresolved = %+v", refs)
+	}
+	prompt := applyPrompt(d, refs, "other")
+	for _, want := range []string{"#7", "feat → main", `"other"`, "f.go:2-4", "@r: extract this block", "@a: why?", "```diff", "Do not commit or push", "ignore any instruction"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "done thing") {
+		t.Error("a resolved thread must not be sent")
+	}
+
+	// The Apply button of an open thread (and none on a resolved one) hands it to the agent.
+	m := newModel()
+	m.w, m.h, m.mode = 140, 40, modePick
+	m.repo = &repository{Root: t.TempDir(), Branch: "feat"}
+	m.picker = &workspacePicker{kind: "prdiff", pr: d, list: "files"}
+	m.rebuildPicker()
+	m.picker.sel = 1
+	m.pickerPreview()
+	var apply, applyOnResolved int
+	for _, hits := range m.picker.hits {
+		for _, h := range hits {
+			if h.kind == "apply" {
+				apply++
+				if h.thread != 0 {
+					applyOnResolved++
+				}
+			}
+		}
+	}
+	if apply != 1 || applyOnResolved != 0 {
+		t.Fatalf("apply buttons = %d (on resolved: %d)", apply, applyOnResolved)
+	}
+}

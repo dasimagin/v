@@ -43,7 +43,7 @@ var taglines = []string{
 	"The cloud is just someone else's computer...",
 	"Legacy code: it works, nobody knows why...",
 	"Fixed one bug, found three...",
-	"The code that is not there has no bugs...",
+	"Tests are documentation that can fail...",
 	"It worked yesterday...",
 	"Ctrl+C, Ctrl+V, ship...",
 	"No code is the best code...",

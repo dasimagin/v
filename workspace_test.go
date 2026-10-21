@@ -542,7 +542,7 @@ func TestApplyPromptAndButton(t *testing.T) {
 	if len(refs) != 1 || refs[0].thread.ID != "T1" {
 		t.Fatalf("unresolved = %+v", refs)
 	}
-	prompt, warn := applyPrompt(t.TempDir(), d, refs, "other", false)
+	prompt, warn := applyPrompt(t.TempDir(), d, refs, "other", false, false, 0, 0)
 	if warn != "" {
 		t.Errorf("the built-in prompt must be usable: %s", warn)
 	}

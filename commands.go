@@ -36,6 +36,9 @@ var commands = []*Command{
 		Name: "show", Desc: "Browse this branch's history", Run: (*model).cmdShow,
 	},
 	{
+		Name: "converge", Desc: "Review and fix this PR in rounds until the reviewer is satisfied (experimental)", Run: (*model).cmdConverge,
+	},
+	{
 		Name: "apply", Desc: "Have the agent fix the open review threads of this PR", Run: (*model).cmdApply,
 	},
 	{
@@ -117,6 +120,10 @@ func (m *model) run(input string) tea.Cmd {
 	if !strings.HasPrefix(input, "/") && m.rv != nil && m.rv.running && !m.rv.dropped && (!m.rv.apply || m.busy) {
 		m.rv.addNote(input) // reaches the agent with its next tool result, mid-turn
 		m.note("note for the agent · it sees it with its next tool result")
+		return nil
+	}
+	if m.loop != nil && m.loop.finished && !strings.HasPrefix(input, "/") {
+		m.setErr("the loop has finished: leave with esc")
 		return nil
 	}
 	if m.runScr != nil && strings.HasPrefix(input, "/") {

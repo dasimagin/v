@@ -44,12 +44,13 @@ type model struct {
 	repo                                 *repository
 	repoMenu                             *repoMenu
 	picker                               *workspacePicker
-	rv                                   *reviewFlow // /review or /apply in progress
-	runScr                               *runScreen  // the run on screen, if any
-	hub                                  *applyHub   // points the chat agent's pr_* tools at the /apply run
-	toolsOn                              bool        // an apply run is open: its agent has the hub's tools
-	agentHasTools                        bool        // the running agent was started with tools
-	deferred                             tea.Cmd     // work an event handler hands to Update
+	rv                                   *reviewFlow   // /review or /apply in progress
+	runScr                               *runScreen    // the run on screen, if any
+	loop                                 *convergeLoop // /converge in progress
+	hub                                  *applyHub     // points the chat agent's pr_* tools at the /apply run
+	toolsOn                              bool          // an apply run is open: its agent has the hub's tools
+	agentHasTools                        bool          // the running agent was started with tools
+	deferred                             tea.Cmd       // work an event handler hands to Update
 	repoSeq                              int
 	repoLoading, prLoading, repoChanging bool
 
@@ -224,6 +225,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onPRDeleted(msg)
 	case prComposedMsg:
 		return m, m.onPRComposed(msg)
+	case convergeReadyMsg:
+		return m, m.onConvergeReady(msg)
+	case convergePostedMsg:
+		return m, m.onConvergePosted(msg)
+	case convergePhaseMsg:
+		return m, m.onConvergePhase(msg)
+	case convergeFixedMsg:
+		return m, m.onConvergeFixed(msg)
 	case reviewReadyMsg:
 		return m, m.onReviewReady(msg)
 	case reviewAskMsg:

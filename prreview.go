@@ -512,6 +512,9 @@ func (m *model) onReviewPosted(msg reviewPostedMsg) {
 func (m *model) reviewEsc() {
 	rv := m.rv
 	rv.ask = nil
+	if m.loop != nil {
+		m.loop.aborted = true // stops the whole loop, not just this phase
+	}
 	if rv.running && rv.cancel != nil {
 		rv.dropped = true
 		rv.cancel()

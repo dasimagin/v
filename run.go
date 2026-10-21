@@ -63,12 +63,13 @@ func (m *model) leaveRun() {
 	}
 	m.hub.set(nil)
 	m.toolsOn = false
+	m.loop = nil
 	m.stopAgent()
 	m.runScr = nil
 	m.log, m.sessionID, m.resumeNext, m.queue = r.stash.log, r.stash.sessionID, r.stash.sessionID != "" || r.stash.resumeNext, r.stash.queue
 	m.interrupted, m.noting, m.choice = false, false, 0
-	if r.kind == "apply" {
-		notice := fmt.Sprintf("A separate /apply run, with a fresh agent, just worked in %s: it may have edited files, made commits, pushed, and replied in the PR's review threads. Read the git state before continuing.", m.workdir)
+	if r.kind == "apply" || r.kind == "converge" {
+		notice := fmt.Sprintf("A separate /"+r.kind+" run, with fresh agents, just worked in %s: it may have edited files, made commits, pushed, and replied in the PR's review threads. Read the git state before continuing.", m.workdir)
 		if m.workspaceNotice != "" {
 			notice = m.workspaceNotice + " " + notice
 		}
@@ -92,6 +93,10 @@ func (m *model) chatHeader() []string {
 	case m.rv != nil || m.busy:
 		info = "working · esc stops it"
 	}
+	if lp := m.loop; lp != nil && !lp.finished {
+		who := map[string]string{"review": "reviewer", "fix": "fixer"}[lp.phase]
+		info = fmt.Sprintf("round %d/%d · the %s · esc stops", lp.iter, lp.max, who)
+	}
 	mode := "manual"
 	if r.auto {
 		mode = "auto"
@@ -100,4 +105,4 @@ func (m *model) chatHeader() []string {
 }
 
 // runBlocked are the commands that would pull the rug from under a run.
-var runBlocked = map[string]bool{"reset": true, "resume": true, "workdir": true, "switch": true, "branch": true, "apply": true, "review": true}
+var runBlocked = map[string]bool{"converge": true, "reset": true, "resume": true, "workdir": true, "switch": true, "branch": true, "apply": true, "review": true}

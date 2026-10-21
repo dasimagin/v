@@ -18,8 +18,8 @@ type applyRef struct {
 // instructions of prompts/fixer.md, then the threads. The threads are other
 // people's text, so the instructions say to treat them as feedback about the
 // code and nothing else.
-func applyPrompt(workdir string, d *prData, refs []applyRef, branch string, auto bool) (text, warn string) {
-	head, warn := renderPrompt("fixer", workdir, promptData{Number: d.Number, Title: d.Title, Head: d.Head, Base: d.Base, Branch: branch, Auto: auto})
+func applyPrompt(workdir string, d *prData, refs []applyRef, branch string, auto, loop bool, round, rounds int) (text, warn string) {
+	head, warn := renderPrompt("fixer", workdir, promptData{Number: d.Number, Title: d.Title, Head: d.Head, Base: d.Base, Branch: branch, Auto: auto, Loop: loop, Round: round, MaxRounds: rounds})
 	var b strings.Builder
 	b.WriteString(head)
 	b.WriteString("\n\n## The threads\n")
@@ -162,7 +162,7 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 		mode = "on its own"
 	}
 	m.note(fmt.Sprintf("handing %d review %s to a fresh agent, working %s · type to guide it, esc leaves", len(refs), noun, mode))
-	task, warn := applyPrompt(m.repo.Root, d, refs, m.repo.Branch, rv.auto)
+	task, warn := applyPrompt(m.repo.Root, d, refs, m.repo.Branch, rv.auto, false, 0, 0)
 	if warn != "" {
 		m.noteErr(warn)
 	}
@@ -241,6 +241,11 @@ func (m *model) finishRunTurn() {
 	select {
 	case rv.out <- reviewEndMsg{rv}: // lets the waiting command return
 	default:
+	}
+	if m.loop != nil { // the loop decides what follows
+		m.deferred = m.loopTurnEnded(rv)
+		rv.dropped = false
+		return
 	}
 	var cmds []tea.Cmd
 	if !rv.apply {

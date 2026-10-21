@@ -616,23 +616,8 @@ func TestDeletingYourOwnComments(t *testing.T) {
 	if len(hits) != 1 || hits[0].comment != 1 {
 		t.Fatalf("delete buttons in the file: %+v", hits)
 	}
-	if cmd := click(hits[0], rows[0]); cmd != nil || m.picker.armed != "RC_mine" {
-		t.Fatalf("the first click must only ask: cmd=%v armed=%q", cmd, m.picker.armed)
-	}
-	if cmd := click(hits[0], rows[0]); cmd == nil || m.picker.armed != "" {
-		t.Fatalf("the second click must delete: cmd=%v armed=%q", cmd, m.picker.armed)
-	}
-	// Another click in between disarms.
-	click(hits[0], rows[0])
-	m.previewClick(lw+1, headerRows+500)
-	if m.picker.armed != "" {
-		t.Error("a click elsewhere must disarm")
-	}
-	// A key press disarms too.
-	click(hits[0], rows[0])
-	m.pickerKey(tea.KeyMsg{Type: tea.KeyDown})
-	if m.picker.armed != "" {
-		t.Error("a key must disarm")
+	if cmd := click(hits[0], rows[0]); cmd == nil {
+		t.Fatal("one click on ✕ must delete")
 	}
 	// In the conversation: your general comment, not the other one.
 	m.picker.sel = 0

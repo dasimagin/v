@@ -40,7 +40,6 @@ type workspacePicker struct {
 	focus            int    // row of the preview to bring into view
 	compose          *composeState
 	hits             map[int][]prHit // clickable spots in the PR preview, by row
-	armed            string          // node id of the comment whose ✕ was clicked once
 	rowLines         map[int]int     // diff line of each numbered preview row
 	seq              int
 }
@@ -344,7 +343,6 @@ func (m *model) chooseFile() tea.Cmd {
 
 func (m *model) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	p := m.picker
-	p.armed = ""
 	if p.kind == "prdiff" {
 		if p.compose != nil {
 			return m.composeKey(msg)

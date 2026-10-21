@@ -124,14 +124,9 @@ func (m *model) previewClick(x, y int) tea.Cmd {
 	}
 	rel := x - (m.pickerListWidth() + 1)
 	row := p.pscroll + y - headerRows
-	armed := p.armed
-	p.armed = "" // any other click disarms a delete
 	for _, h := range p.hits[row] {
 		if rel < h.x0 || rel >= h.x1 {
 			continue
-		}
-		if h.kind == "delete" {
-			p.armed = armed // deleteComment decides
 		}
 		if c := p.compose; c != nil {
 			// While a line comment is open, clicking another line of the same file
@@ -334,8 +329,7 @@ type prDeletedMsg struct {
 	err error
 }
 
-// deleteComment removes one of your comments from GitHub. The first click on
-// its ✕ asks, the second one (on the same comment) does it.
+// deleteComment removes one of your comments from GitHub, at once.
 func (m *model) deleteComment(h prHit) tea.Cmd {
 	p := m.picker
 	var id string
@@ -352,12 +346,6 @@ func (m *model) deleteComment(h prHit) tea.Cmd {
 	if id == "" {
 		return nil
 	}
-	if p.armed != id {
-		p.armed = id
-		m.flash("click ✕ again to delete this comment from GitHub (it cannot be undone) · any other click cancels")
-		return nil
-	}
-	p.armed = ""
 	query := `mutation($id:ID!){deletePullRequestReviewComment(input:{id:$id}){clientMutationId}}`
 	if issue {
 		query = `mutation($id:ID!){deleteIssueComment(input:{id:$id}){clientMutationId}}`

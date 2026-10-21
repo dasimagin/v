@@ -734,3 +734,90 @@ func TestSubmitMenuAndPendingSummary(t *testing.T) {
 		t.Error("nothing pending: nothing to submit")
 	}
 }
+
+func TestBottomLineAndHelp(t *testing.T) {
+	m := newModel()
+	m.settings = defaultSettings()
+	m.w, m.h, m.mode = 120, 30, modeChat
+	m.workdir = "/Users/dasimagin/sandbox/project"
+	m.repo = &repository{Root: "/x", Branch: "feat", PRs: []pullRequest{{Number: 7, URL: "https://github.com/o/r/pull/7"}}}
+	line := func() string { return ansi.Strip(m.renderStatusLine()) }
+
+	// Model and effort on the left, then the hint; the workdir, branch and PR on the right.
+	l := line()
+	order := []string{"Opus 5.5 · high", "? help", "~/sandbox/project", "feat", "PR #7"}
+	prev := -1
+	for _, s := range order {
+		i := strings.Index(l, s)
+		if i < 0 || i < prev {
+			t.Fatalf("%q is missing or out of order in %q", s, l)
+		}
+		prev = i
+	}
+	if w := ansi.StringWidth(m.renderStatusLine()); w != m.w {
+		t.Errorf("line width = %d, want %d", w, m.w)
+	}
+	// A notice replaces the hint and leaves the rest alone.
+	m.status = "posting…"
+	if l := line(); strings.Contains(l, "? help") || !strings.Contains(l, "posting…") || !strings.Contains(l, "Opus 5.5") {
+		t.Errorf("with a notice: %q", l)
+	}
+	m.status = ""
+	// On a narrow window the model gives way first, the branch and PR stay.
+	m.w = 45
+	if l := line(); strings.Contains(l, "Opus") || !strings.Contains(l, "PR #7") || !strings.Contains(l, "feat") {
+		t.Errorf("narrow: %q", l)
+	}
+	m.w = 120
+
+	// The model and effort are still clickable on the left.
+	var modelPart workspacePart
+	for _, p := range m.workspaceParts() {
+		if p.kind == "model" {
+			modelPart = p
+		}
+	}
+	if modelPart.text == "" || modelPart.x != 1 {
+		t.Fatalf("model part = %+v", modelPart)
+	}
+	if handled, cmd := m.workspaceClick(modelPart.x+1, m.h-1); !handled || cmd != nil || m.repoMenu == nil || m.repoMenu.kind != "model" {
+		t.Errorf("clicking the model must open its dropdown: %v %v", handled, m.repoMenu)
+	}
+	m.repoMenu = nil
+
+	// "?" opens the help of the screen, any key closes it.
+	m.omni.SetValue("")
+	next, _ := m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = next.(model)
+	if !m.help {
+		t.Fatal("? with an empty input must open the help")
+	}
+	view := strings.Repeat(strings.Repeat(" ", m.w)+"\n", m.h-1) + strings.Repeat(" ", m.w)
+	if shown := ansi.Strip(m.overlayMenus(view)); !strings.Contains(shown, "Chat") || !strings.Contains(shown, "commands") {
+		t.Errorf("help for the chat: %q", shown)
+	}
+	next, _ = m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = next.(model)
+	if m.help || m.omni.Value() != "" {
+		t.Error("the key that closes the help must not be typed")
+	}
+	// Mid-sentence a question mark is just a character.
+	m.omni.SetValue("why")
+	if m.wantsHelp() {
+		t.Error("typing: ? must not open the help")
+	}
+	m.omni.SetValue("")
+	// The help follows the screen.
+	m.mode = modePick
+	m.picker = &workspacePicker{kind: "prdiff", list: "files"}
+	if title, rows := m.helpFor(); title != "Pull request" || len(rows) < 8 {
+		t.Errorf("PR help: %q %d rows", title, len(rows))
+	}
+	m.picker.compose = &composeState{kind: "line"}
+	if m.wantsHelp() {
+		t.Error("while writing a comment ? is text")
+	}
+	if title, _ := m.helpFor(); title != "Writing a comment" {
+		t.Errorf("compose help: %q", title)
+	}
+}

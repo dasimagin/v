@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -199,31 +200,59 @@ func (m *model) workspaceParts() []workspacePart {
 	}
 	branch = truncate(branch, max(m.w/4, 4))
 	pr = truncate(pr, max(m.w/5, 4))
-	available := max(m.w-min(28, m.w/3)-1, 1)
-	extra := 0
+	rightExtra := 0 // the branch and the PR, with the gaps before them
 	for _, s := range []string{branch, pr} {
 		if s != "" {
-			extra += lipgloss.Width(s) + 3
+			rightExtra += lipgloss.Width(s) + 3
 		}
 	}
+	// Model and effort sit on the left; they give way to the path when the
+	// window is narrow, and the text between the two blocks is last to be served.
 	model, effort := m.agentParts()
-	if agent := model + " · " + effort; available-extra-lipgloss.Width(agent)-3 < 12 {
-		model, effort = "", ""
-	} else {
-		extra += lipgloss.Width(agent) + 3
+	leftW := 1 + lipgloss.Width(model) + 3 + lipgloss.Width(effort)
+	const textMin = 9 // room for "? help"
+	pathMax := m.w - 1 - rightExtra - leftW - 3 - textMin
+	if pathMax < 10 {
+		model, effort, leftW = "", "", 0
+		pathMax = m.w - 1 - rightExtra - 1
 	}
-	path := truncate(tildify(m.workdir), max(available-extra, 1))
-	x := max(m.w-lipgloss.Width(path)-extra-1, 0)
+	path := truncate(tildify(m.workdir), max(pathMax, 1))
+	x := max(m.w-lipgloss.Width(path)-rightExtra-1, 0)
 	parts := []workspacePart{{kind: "workdir", text: path, x: x}}
 	x += lipgloss.Width(path)
-	for _, p := range []workspacePart{{kind: "branch", text: branch}, {kind: "pr", text: pr}, {kind: "model", text: model}, {kind: "effort", text: effort, sep: " · "}} {
+	for _, p := range []workspacePart{{kind: "branch", text: branch}, {kind: "pr", text: pr}} {
 		if p.text != "" {
 			p.x = x + 3
 			parts = append(parts, p)
 			x = p.x + lipgloss.Width(p.text)
 		}
 	}
+	if model != "" {
+		parts = append(parts, workspacePart{kind: "model", text: model, x: 1})
+		parts = append(parts, workspacePart{kind: "effort", text: effort, x: 1 + lipgloss.Width(model) + 3, sep: " · "})
+	}
 	return parts
+}
+
+// statusRegion is the stretch of the bottom line between the model and the
+// path, where notices, the file's buttons and the "? help" hint appear.
+func (m *model) statusRegion() (x0, width int) {
+	x0, right := 1, m.w
+	for _, p := range m.workspaceParts() {
+		switch p.kind {
+		case "effort":
+			x0 = p.x + lipgloss.Width(p.text) + 3
+		case "workdir":
+			right = p.x
+		}
+	}
+	return x0, max(right-2-x0, 0)
+}
+
+// showHint reports whether the bottom line shows its "? help" hint: nothing
+// else wants the space.
+func (m *model) showHint() bool {
+	return m.status == "" && m.exitKey == "" && len(m.footerActions()) == 0
 }
 
 func (m *model) repoMenuLayout() (x, width int) {
@@ -313,6 +342,12 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 			return true, nil
 		}
 	}
+	if y == m.h-1 && m.showHint() && m.w > 0 {
+		if x0, width := m.statusRegion(); x >= x0 && x < x0+min(lipgloss.Width(helpHint), width) {
+			m.help = true
+			return true, nil
+		}
+	}
 	if y == m.h-1 {
 		for _, p := range m.workspaceParts() {
 			if x < p.x || x >= p.x+lipgloss.Width(p.text) {
@@ -334,6 +369,9 @@ func (m *model) workspaceClick(x, y int) (bool, tea.Cmd) {
 				if m.perm == nil {
 					return true, m.cmdAgentMenu(p.kind)
 				}
+				return true, nil
+			case "help":
+				m.help = true
 				return true, nil
 			}
 		}
@@ -433,6 +471,9 @@ func (m *model) overlayMenus(view string) string {
 			put(x, toolbarRow+1+i, st.Render(text+strings.Repeat(" ", max(width-lipgloss.Width(text), 0))))
 		}
 	}
+	if m.help {
+		lines = m.overlayHelp(lines)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -453,31 +494,46 @@ func (m *model) footerActions() []footerAction {
 }
 
 func (m *model) renderStatusLine() string {
-	left, style := " "+m.status, errStyle
+	text, style := m.status, errStyle
 	if m.statusInfo {
 		style = hintStyle
 	}
 	if m.exitKey != "" {
-		left, style = " Press "+keyNames[m.exitKey]+" again to exit", hintStyle
+		text, style = "Press "+keyNames[m.exitKey]+" again to exit", hintStyle
 	}
 	parts := m.workspaceParts()
-	width := max(parts[0].x-1, 0)
-	content := style.Render(truncate(left, width))
-	if actions := m.footerActions(); len(actions) > 0 {
+	sort.SliceStable(parts, func(i, j int) bool { return parts[i].x < parts[j].x })
+	x0, width := m.statusRegion()
+	content := style.Render(truncate(text, width))
+	switch actions := m.footerActions(); {
+	case len(actions) > 0:
 		var b strings.Builder
-		for _, a := range actions {
-			b.WriteString(blank(1) + buttonStyle.Render(" "+a.label+" "))
+		for i, a := range actions {
+			if i > 0 {
+				b.WriteString(blank(1))
+			}
+			b.WriteString(buttonStyle.Render(" " + a.label + " "))
 		}
 		content = ansi.Truncate(b.String(), width, "…")
+	case m.showHint() && width >= lipgloss.Width(helpHint):
+		content = hintStyle.Render(helpHint)
 	}
 	var b strings.Builder
-	b.WriteString(content)
-	x := lipgloss.Width(content)
+	x := 0
+	put := func(at int, s string) {
+		b.WriteString(blank(at - x))
+		b.WriteString(s)
+		x = max(x, at) + lipgloss.Width(s)
+	}
+	placed := false
 	for _, p := range parts {
+		if !placed && p.x > x0 {
+			put(x0, content)
+			placed = true
+		}
 		if p.sep != "" && p.x-x == lipgloss.Width(p.sep) {
 			b.WriteString(hintStyle.Render(p.sep))
-		} else {
-			b.WriteString(blank(p.x - x))
+			x = p.x
 		}
 		st := hintStyle
 		if p.kind == "branch" {
@@ -486,8 +542,7 @@ func (m *model) renderStatusLine() string {
 		if p.kind == "pr" && m.repo.selectedPR() != nil {
 			st = fgStyle
 		}
-		b.WriteString(st.Render(p.text))
-		x = p.x + lipgloss.Width(p.text)
+		put(p.x, st.Render(p.text))
 	}
 	return ansi.Truncate(b.String()+blank(m.w-x), m.w, "")
 }
@@ -496,11 +551,11 @@ func (m *model) footerClick(x int) bool {
 	if m.perm != nil {
 		return false
 	}
-	width := max(m.workspaceParts()[0].x-1, 0)
-	at := 0
+	x0, width := m.statusRegion()
+	at := x0
 	for _, a := range m.footerActions() {
-		end := at + lipgloss.Width(a.label) + 3
-		if x >= at && x < end && end <= width {
+		end := at + lipgloss.Width(a.label) + 2
+		if x >= at && x < end && end-x0 <= width {
 			switch a.key {
 			case "save":
 				m.save()

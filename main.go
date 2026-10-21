@@ -79,6 +79,7 @@ type model struct {
 	rmode      viewMode  // the same for reviews of agent edits
 	viewMenu   *viewMenu // open view-mode dropdown
 	listMenu   *viewMenu // open Files/Comments dropdown of the PR screen
+	help       bool      // the help of the screen on top is open
 	submitMenu *viewMenu // open verdict dropdown (Comment, Approve, Request changes, Discard)
 	stack      []screen  // screens to return to with Esc
 
@@ -154,6 +155,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.omni.Width = m.w - 4
 		return m, nil
 	case tea.MouseMsg:
+		if m.help && msg.Action == tea.MouseActionPress {
+			m.help = false // a click closes the help
+			return m, nil
+		}
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			if handled, cmd := m.workspaceClick(msg.X, msg.Y); handled {
 				return m, cmd
@@ -264,6 +269,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+	if m.help { // any key closes the help; the key itself is not used
+		m.help = false
+		return m, nil
+	}
+	if k == "?" && m.wantsHelp() {
+		m.help = true
+		return m, nil
+	}
 	if m.repoMenu != nil {
 		return m, m.repoMenuKey(msg)
 	}
@@ -642,4 +655,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// wantsHelp reports whether a "?" should open the help: nothing is being typed.
+func (m *model) wantsHelp() bool {
+	switch {
+	case m.omni.Value() != "" || m.noting:
+		return false
+	case m.mode == modePick && m.picker != nil && m.picker.compose != nil:
+		return false
+	case m.fileMode() && m.doc != nil && m.doc.Ed.On:
+		return false
+	}
+	return true
 }

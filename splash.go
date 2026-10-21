@@ -129,7 +129,6 @@ func renderTip(t tip, width int) []string {
 // left and, when the window is wide enough, a rotating tip on the right.
 func splash(tagline string, n, width, rows int) []string {
 	logoLines := renderLogo()
-	logoW := lipgloss.Width(logoLines[0])
 	// A fixed width keeps the card where it is from one joke to the next.
 	const leftW = 36
 	taglineW := leftW

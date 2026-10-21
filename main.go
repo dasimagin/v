@@ -598,7 +598,7 @@ func (m model) View() string {
 			m.omni.Placeholder = "a note for the agent · enter sends it with the answer · esc drops it"
 		}
 	}
-	line(pad(m.omni.View(), bg))
+	line(pad(onThemeBg(m.omni.View()), bg))
 	line(sep)
 	finish := func() string {
 		b.WriteString(m.renderStatusLine())

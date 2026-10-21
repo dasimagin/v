@@ -914,3 +914,33 @@ func TestEveryJokeFitsTheStartScreen(t *testing.T) {
 		t.Errorf("logo axis %d, joke axis %d", logoMid, jokeMid)
 	}
 }
+
+func TestOmniboxKeepsTheThemeBackground(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	m := newModel()
+	m.w = 60
+	m.omni.Width = m.w - 4
+	m.omni.Focus()
+	raw := m.omni.View()
+	fixed := onThemeBg(raw)
+	if ansi.Strip(fixed) != ansi.Strip(raw) {
+		t.Fatal("only styles may change, not the text")
+	}
+	on := bgSeq(cur.Bg)
+	// Every reset is followed by the theme background again, so the padding that
+	// the field adds after its placeholder is not drawn on the terminal's own color.
+	if !strings.HasPrefix(fixed, on) {
+		t.Error("the line must start on the theme background")
+	}
+	for i := 0; i+4 <= len(fixed); i++ {
+		if strings.HasPrefix(fixed[i:], "\x1b[0m") && !strings.HasPrefix(fixed[i+4:], on) {
+			t.Fatalf("a reset at %d is not followed by the theme background: %q", i, fixed[i:min(i+20, len(fixed))])
+		}
+	}
+	// And the raw field really had the problem: padding after a reset, on no background.
+	if !strings.Contains(raw, "\x1b[0m   ") {
+		t.Skip("the field no longer pads with bare spaces; the fix is harmless")
+	}
+}

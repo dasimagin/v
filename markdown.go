@@ -132,3 +132,11 @@ func mdStyle(t *Theme) ansi.StyleConfig {
 }
 
 func uintPtr(u uint) *uint { return &u }
+
+// onThemeBg keeps the theme background behind rendered text that resets its
+// styles: the input field pads itself with unstyled spaces, which would show
+// as a stripe of the terminal's own background.
+func onThemeBg(s string) string {
+	on := bgSeq(cur.Bg)
+	return on + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+on)
+}

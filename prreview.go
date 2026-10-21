@@ -386,11 +386,11 @@ func (rv *reviewFlow) withNotes(tools []mcpTool) []mcpTool {
 // its proposals to the chat.
 func (m *model) cmdReview(arg string) tea.Cmd {
 	switch arg {
-	case "submit", "discard":
+	case "submit", "discard", "":
 		return m.pendingReviewAction(arg)
-	case "":
+	case "make":
 	default:
-		m.setErr("usage: /review [submit | discard]")
+		m.setErr("usage: /review [make | submit | discard]")
 		return nil
 	}
 	if m.rv != nil {
@@ -663,7 +663,8 @@ func pendingReviewID(dir, repo string, number int) (string, error) {
 	return id, nil
 }
 
-// pendingReviewAction publishes your pending review of this branch's PR, or deletes it.
+// pendingReviewAction publishes your pending review of this branch's PR,
+// deletes it, or (no argument) says what is pending.
 func (m *model) pendingReviewAction(what string) tea.Cmd {
 	if m.rv != nil {
 		m.setErr("a review is in progress")
@@ -680,9 +681,22 @@ func (m *model) pendingReviewAction(what string) tea.Cmd {
 		return nil
 	}
 	dir := m.repo.Root
-	m.flash(what + "ing the pending review…")
+	if what != "" {
+		m.flash(what + "ing the pending review…")
+	}
 	return func() tea.Msg {
 		id, err := pendingReviewID(dir, repo, n)
+		if what == "" { // status
+			if err != nil {
+				return reviewActionMsg{text: fmt.Sprintf("no pending review on PR #%d · /review make has Claude review it", n)}
+			}
+			out, cerr := ghOutput(dir, "api", "--paginate", "--jq", ".[] | .id", fmt.Sprintf("repos/%s/pulls/%d/reviews/%s/comments", repo, n, id))
+			if cerr != nil {
+				return reviewActionMsg{err: cerr}
+			}
+			count := len(strings.Fields(string(out)))
+			return reviewActionMsg{text: fmt.Sprintf("a pending review on PR #%d has %d comments, visible only to you · /review submit publishes it, /review discard deletes it, /review make runs a new review", n, count)}
+		}
 		if err != nil {
 			return reviewActionMsg{err: err}
 		}

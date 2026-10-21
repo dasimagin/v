@@ -909,3 +909,18 @@ func TestSplashShowsLogoAndATipSideBySide(t *testing.T) {
 		t.Error("the rotation must stop outside the start screen")
 	}
 }
+
+func TestResetChangesTheTipWithTheJoke(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		m := newModel()
+		m.hub = &applyHub{}
+		m.tip, m.tagline = i%len(tips), i%len(taglines)
+		oldTip, oldJoke := m.tip, m.tagline
+		if cmd := m.cmdReset(""); cmd == nil {
+			t.Fatal("reset must keep the start screen turning")
+		}
+		if m.tip == oldTip || m.tagline == oldJoke || m.mode != modeSplash {
+			t.Fatalf("tip %d→%d, joke %d→%d, mode %v", oldTip, m.tip, oldJoke, m.tagline, m.mode)
+		}
+	}
+}

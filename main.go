@@ -641,6 +641,7 @@ func main() {
 	if t == nil {
 		t = findTheme(defaultTheme)
 	}
+	transparentBG = s.Background == "terminal"
 	applyTheme(t)
 	applyDiffSettings(s)
 	applyPRSettings(s)
@@ -660,8 +661,13 @@ func main() {
 	}
 	// Connect to Claude Code right away; it signs in with the user's login.
 	m.listen = m.connect()
+	if s.Background == "sync" {
+		syncTerminalBackground()
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
+	// Whatever the setting was at the end, the terminal gets its own background back.
+	resetTerminalBackground()
 	if fm, ok := final.(model); ok {
 		fm.stopAgent()
 	}

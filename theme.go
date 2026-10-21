@@ -120,10 +120,17 @@ func loadThemes(userDir string) error {
 	return errors.Join(errs...)
 }
 
+// transparentBG leaves the screen's background to the terminal instead of
+// painting the theme's, so no rectangle shows when the two differ.
+var transparentBG bool
+
 func applyTheme(t *Theme) {
 	cur = t
 	c := func(s string) lipgloss.Color { return lipgloss.Color(s) }
-	bg = lipgloss.NewStyle().Background(c(t.Bg))
+	bg = lipgloss.NewStyle()
+	if !transparentBG {
+		bg = bg.Background(c(t.Bg))
+	}
 	fgStyle = bg.Foreground(c(t.Fg))
 	sepStyle = bg.Foreground(c(t.Gutter))
 	hintStyle = bg.Foreground(c(t.Muted))

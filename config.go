@@ -259,9 +259,32 @@ var options = []option{
 			return nil
 		},
 	},
+	{
+		label: "Background",
+		desc:  "Theme: v paints its own background. Terminal: v leaves it to the terminal, so no rectangle shows when the two colors differ. Theme + terminal: also sets the terminal's own background to the theme's (kitty, iTerm2, WezTerm), and restores it on exit",
+		values: func(*model) []string {
+			return []string{"Theme color", "Terminal's own", "Theme color, set on the terminal too"}
+		},
+		get: func(m *model) int {
+			for i, v := range backgroundModes {
+				if v == m.settings.Background {
+					return i
+				}
+			}
+			return 0
+		},
+		set: func(m *model, i int) error {
+			m.settings.Background = backgroundModes[i]
+			m.applyBackground()
+			return nil
+		},
+	},
 }
 
 var iterationChoices = []int{1, 2, 3, 4, 5, 6, 8, 10}
+
+// backgroundModes are the values of the Background setting, in the order of its dropdown.
+var backgroundModes = []string{"theme", "terminal", "sync"}
 
 // contextIndex is the dropdown entry closest to n lines of context.
 func contextIndex(n int) int {
@@ -350,6 +373,9 @@ func (m *model) cmdConfig(string) tea.Cmd {
 
 func (m *model) setTheme(t *Theme) {
 	applyTheme(t)
+	if m.settings.Background == "sync" {
+		syncTerminalBackground() // the terminal follows the theme
+	}
 	previews, prAnchors, prLineRows, prBoxHits, prConvHits = map[string]previewEntry{}, map[string][]int{}, map[string]map[int]int{}, map[string][]boxHits{}, map[string]map[int][]prHit{} // styled previews hold the old colors
 	m.styleOmni()
 }

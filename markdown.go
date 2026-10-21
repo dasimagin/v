@@ -41,11 +41,11 @@ func markdown(text string, width int) []string {
 	if err != nil {
 		return strings.Split(text, "\n")
 	}
-	keepBg := "\x1b[0m" + bgSeq(cur.Bg)
+	keepBg := "\x1b[0m" + themeBg()
 	out = strings.ReplaceAll(out, "\x1b[0m", keepBg)
 	lines := strings.Split(out, "\n")
 	for i, l := range lines {
-		lines[i] = bgSeq(cur.Bg) + strings.TrimRight(xansi.Truncate(l, width, ""), " ")
+		lines[i] = themeBg() + strings.TrimRight(xansi.Truncate(l, width, ""), " ")
 	}
 	// Drop the blank lines glamour puts around the document.
 	for len(lines) > 0 && xansi.Strip(lines[0]) == "" {
@@ -61,12 +61,25 @@ func markdown(text string, width int) []string {
 // padded to width, so the tint forms a solid rectangle.
 func markdownOn(text string, width int) []string {
 	lines := markdown(text, width)
-	plain, tint := bgSeq(cur.Bg), bgSeq(cur.Panel)
+	plain, tint := themeBg(), bgSeq(cur.Panel)
 	for i, l := range lines {
-		l = strings.ReplaceAll(l, plain, tint)
+		if plain != "" {
+			l = strings.ReplaceAll(l, plain, tint)
+		} else { // no background of ours to swap: put the tint back after every reset
+			l = strings.ReplaceAll(l, "\x1b[0m", "\x1b[0m"+tint)
+		}
 		lines[i] = l + bgSeq(cur.Panel) + strings.Repeat(" ", max(width-xansi.StringWidth(l), 0)) + "\x1b[0m"
 	}
 	return lines
+}
+
+// themeBg is the sequence for the screen's background: the theme's, or none
+// when the terminal's own is used.
+func themeBg() string {
+	if transparentBG {
+		return ""
+	}
+	return bgSeq(cur.Bg)
 }
 
 // bgSeqs caches the background sequences by color and color profile.
@@ -152,6 +165,9 @@ func uintPtr(u uint) *uint { return &u }
 // styles: the input field pads itself with unstyled spaces, which would show
 // as a stripe of the terminal's own background.
 func onThemeBg(s string) string {
-	on := bgSeq(cur.Bg)
+	on := themeBg()
+	if on == "" {
+		return s
+	}
 	return on + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+on)
 }

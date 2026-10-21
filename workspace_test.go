@@ -987,3 +987,71 @@ func TestHandMadeBackgroundsMatchTheTerminalsColorProfile(t *testing.T) {
 		t.Errorf("without colors the block is still 12 wide: %q", got)
 	}
 }
+
+func TestBackgroundSettingAndTerminalSequences(t *testing.T) {
+	if got := oscBackground("#23272e", false); got != "\x1b]11;#23272e\x07" {
+		t.Errorf("set = %q", got)
+	}
+	if got := oscBackground("", false); got != "\x1b]111\x07" {
+		t.Errorf("reset = %q", got)
+	}
+	if got := oscBackground("#23272e", true); got != "\x1bPtmux;\x1b\x1b]11;#23272e\x07\x1b\\" {
+		t.Errorf("tmux = %q", got)
+	}
+
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer func() {
+		lipgloss.SetColorProfile(prev)
+		transparentBG = false
+		applyTheme(cur)
+	}()
+	painted := bg.Render(" ")
+	if !strings.Contains(painted, "48;2;") {
+		t.Fatalf("the theme background is painted by default: %q", painted)
+	}
+
+	m := newModel()
+	m.settings = defaultSettings()
+	if m.settings.Background != "theme" {
+		t.Errorf("default = %q", m.settings.Background)
+	}
+	var opt option
+	for _, o := range options {
+		if o.label == "Background" {
+			opt = o
+		}
+	}
+	if opt.label == "" || len(opt.values(&m)) != 3 || opt.get(&m) != 0 {
+		t.Fatalf("the Background option: %+v", opt.label)
+	}
+	opt.set(&m, 1) // the terminal's own
+	if m.settings.Background != "terminal" || !transparentBG || opt.get(&m) != 1 {
+		t.Fatalf("terminal mode: %q transparent=%v", m.settings.Background, transparentBG)
+	}
+	// Now nothing paints the theme's background: the screen takes the terminal's.
+	m.w, m.h, m.mode = 100, 30, modeChat
+	m.omni.Width = m.w - 4
+	m.log = []message{{kind: msgUser, text: "hi"}, {kind: msgAgent, text: "hello **there**"}}
+	themeBgSeq := strings.TrimSuffix(strings.TrimPrefix(painted[:strings.Index(painted, " ")], "\x1b["), "m")
+	if strings.Contains(bg.Render(" "), "48;") || strings.Contains(m.View(), themeBgSeq) {
+		t.Error("in terminal mode the theme's background must not be painted")
+	}
+	if line := onThemeBg(m.omni.View()); line != m.omni.View() {
+		t.Error("the omnibox line is left alone")
+	}
+	if got := markdownOn("tinted", 12); !strings.Contains(got[0], bgSeq(cur.Panel)) || ansi.StringWidth(got[0]) != 12 {
+		t.Errorf("a comment body keeps its own tint: %q", got)
+	}
+	opt.set(&m, 2) // the theme's, also set on the terminal
+	if m.settings.Background != "sync" || transparentBG {
+		t.Errorf("sync mode: %q transparent=%v", m.settings.Background, transparentBG)
+	}
+	if !strings.Contains(bg.Render(" "), "48;2;") {
+		t.Error("sync mode paints the theme background again")
+	}
+	opt.set(&m, 0)
+	if m.settings.Background != "theme" || transparentBG {
+		t.Error("back to the theme")
+	}
+}

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // uiEvent is something the agent did, as the page gets it.
@@ -17,6 +20,8 @@ type uiEvent struct {
 	Secs    float64 `json:"secs,omitempty"`
 	Turns   int     `json:"turns,omitempty"`
 	IsError bool    `json:"isError,omitempty"`
+	ToolID  string  `json:"toolId,omitempty"` // tool, tool-result: the call
+	Detail  string  `json:"detail,omitempty"` // tool: its arguments, readable
 }
 
 // uiMsg is a line of a past conversation.
@@ -85,10 +90,22 @@ func (c *uiChat) pump(a *claudeAgent) {
 		case evThinking:
 			c.emit(uiEvent{Kind: "thinking", Text: e.text})
 		case evTool:
-			c.emit(uiEvent{Kind: "tool", Text: e.text})
+			c.emit(uiEvent{Kind: "tool", Text: e.text, Tool: e.tool, ToolID: e.toolID, Detail: toolDetail(e.tool, e.input)})
+		case evToolResult:
+			c.emit(uiEvent{Kind: "tool-result", ToolID: e.toolID, Text: clipText(e.text, uiResultMax), IsError: e.isErr})
 		case evToolError:
 			c.emit(uiEvent{Kind: "tool-error", Text: e.text})
 		case evAsk:
+			// In auto mode the agent goes on by itself, except for what autoDeny refuses.
+			if s, _ := loadSettings(); s.Mode == reviewAuto {
+				if reason := autoDeny(e.perm.tool, e.perm.input); reason != "" {
+					_ = a.Answer(e.perm, false, reason)
+					c.emit(uiEvent{Kind: "note", Text: "denied: " + reason})
+				} else {
+					_ = a.Answer(e.perm, true, "")
+				}
+				continue
+			}
 			id := fmt.Sprint(e.perm.id)
 			c.mu.Lock()
 			c.perms[id] = e.perm
@@ -171,4 +188,97 @@ func (c *uiChat) Resume(dir, path string) []uiMsg {
 		out = append(out, uiMsg{kind, m.text})
 	}
 	return out
+}
+
+const (
+	uiDetailMax = 6 << 10
+	uiResultMax = 20 << 10
+)
+
+// clipText keeps the start of s, up to max bytes, on a character boundary.
+func clipText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s + "\n… cut"
+}
+
+// resultText is the text of a tool result: a string, or a list of text blocks.
+func resultText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var out []string
+	for _, p := range parts {
+		out = append(out, p.Text)
+	}
+	return strings.Join(out, "\n")
+}
+
+// diffText shows a replacement as lines to remove and lines to add.
+func diffText(oldText, newText string) string {
+	var b strings.Builder
+	for _, l := range strings.Split(oldText, "\n") {
+		b.WriteString("- " + l + "\n")
+	}
+	for _, l := range strings.Split(newText, "\n") {
+		b.WriteString("+ " + l + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// toolDetail is what a tool call was given, in a form to read under its summary.
+func toolDetail(name string, in map[string]any) string {
+	str := func(k string) string { s, _ := in[k].(string); return s }
+	var out string
+	switch name {
+	case "Bash":
+		out = str("command")
+	case "Edit":
+		out = diffText(str("old_string"), str("new_string"))
+	case "MultiEdit":
+		edits, _ := in["edits"].([]any)
+		var parts []string
+		for _, e := range edits {
+			if m, ok := e.(map[string]any); ok {
+				o, _ := m["old_string"].(string)
+				n, _ := m["new_string"].(string)
+				parts = append(parts, diffText(o, n))
+			}
+		}
+		out = strings.Join(parts, "\n")
+	case "Write":
+		out = str("content")
+	default:
+		keys := make([]string, 0, len(in))
+		for k := range in {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var lines []string
+		for _, k := range keys {
+			switch v := in[k].(type) {
+			case string:
+				lines = append(lines, k+": "+v)
+			case float64, bool:
+				lines = append(lines, fmt.Sprintf("%s: %v", k, v))
+			default:
+				b, _ := json.Marshal(v)
+				lines = append(lines, k+": "+string(b))
+			}
+		}
+		out = strings.Join(lines, "\n")
+	}
+	return clipText(out, uiDetailMax)
 }

@@ -34,6 +34,7 @@ const (
 	evThinking                    // more thinking text
 	evTool                        // a tool call: text is "Name argument"
 	evToolError                   // a tool failed: text is the first line
+	evToolResult                  // a tool finished: toolID, text (its output), isErr
 	evAsk                         // a permission request: perm
 	evDone                        // the turn ended: secs, turns, or isErr with text
 )
@@ -45,6 +46,9 @@ type ev struct {
 	model   string
 	session string
 	perm    *permission
+	toolID  string         // evTool, evToolResult: the call they belong to
+	tool    string         // evTool: the tool's name
+	input   map[string]any // evTool: its arguments
 	secs    float64
 	turns   int
 	isErr   bool

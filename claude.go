@@ -205,13 +205,16 @@ func claudeEvents(msg claudeMsg, dirs ...string) []ev {
 		var out []ev
 		for _, b := range blocks(msg.Message) {
 			if b.Type == "tool_use" {
-				out = append(out, ev{kind: evTool, text: toolSummary(b.Name, b.Input, dirs...)})
+				out = append(out, ev{kind: evTool, text: toolSummary(b.Name, b.Input, dirs...), toolID: b.ID, tool: b.Name, input: b.Input})
 			}
 		}
 		return out
 	case "user":
 		var out []ev
 		for _, b := range blocks(msg.Message) {
+			if b.Type == "tool_result" {
+				out = append(out, ev{kind: evToolResult, toolID: b.ToolUseID, text: resultText(b.Content), isErr: b.IsError})
+			}
 			// Denials already show on the question line.
 			if line := firstLine(b.Content); b.Type == "tool_result" && b.IsError && !fromUser(line) {
 				out = append(out, ev{kind: evToolError, text: line})
@@ -242,6 +245,7 @@ type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
 	Thinking  string          `json:"thinking"`
+	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     map[string]any  `json:"input"`
 	IsError   bool            `json:"is_error"`

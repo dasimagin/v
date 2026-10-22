@@ -19,3 +19,10 @@ fmt:
 
 clean:
 	rm -f $(BIN)
+
+# The graphical UI is embedded from ui/dist, which is committed: rebuild it
+# after changing ui/ (needs node).
+.PHONY: ui
+
+ui:
+	cd ui && npm install && npm run build

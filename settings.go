@@ -10,9 +10,10 @@ import (
 
 // Settings is the user config in ~/.v/settings.json.
 type Settings struct {
-	Theme  string `json:"theme"`
-	Model  string `json:"model"`  // Claude Code --model
-	Effort string `json:"effort"` // Claude Code --effort
+	Theme   string `json:"theme"`
+	UITheme string `json:"ui_theme"` // the graphical UI: a theme ID, or "light"
+	Model   string `json:"model"`    // Claude Code --model
+	Effort  string `json:"effort"`   // Claude Code --effort
 
 	ApplyMode  string `json:"apply_mode"`          // "manual": ask about every step; "auto": the agent applies, commits, pushes and replies on its own
 	Iterations int    `json:"converge_iterations"` // the most rounds of review and fix that /converge runs
@@ -27,7 +28,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "auto", ApplyMode: "auto", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "auto", ApplyMode: "auto", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme", UITheme: defaultTheme}
 }
 
 // models are the choices for the agent's model, best first.

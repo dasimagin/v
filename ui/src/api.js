@@ -13,7 +13,7 @@ const sample = {
     { name: 'pr', args: '[URL | number]', desc: "Read this branch's PR", supported: true },
     { name: 'log', aliases: ['show'], desc: 'Browse the history of all branches, with their tags', supported: true },
     { name: 'workdir', args: '[directory]', desc: 'Find and choose the working directory', supported: true },
-    { name: 'switch', aliases: ['branch'], args: '[name]', desc: 'Find and switch Git branches', supported: true },
+    { name: 'branch', aliases: ['switch'], args: '[name]', desc: 'Find and switch Git branches', supported: true },
     { name: 'open', args: '[path]', desc: 'Find and open a file', supported: true },
     { name: 'config', desc: 'Settings', supported: true },
     { name: 'resume', desc: 'Continue a past session in this directory', supported: true },
@@ -68,7 +68,7 @@ export const list = (kind, query) =>
               { value: 'a3', label: 'Add the PR screen', meta: '3c1d9aa · Denis · 3 hours ago', refs: [{ name: 'ui-experiment', kind: 'branch' }]},
               { value: 'a4', label: 'Start the graphical UI', meta: '1569d5e · Denis · yesterday', refs: [{ name: 'v0.2', kind: 'tag' }]},
             ]
-          : kind === 'switch'
+          : kind === 'branch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]
           : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }].filter((i) => i.label.includes(query.split('/').pop())),
       })
@@ -88,11 +88,11 @@ const mockDetail = (kind) =>
         files: [{ path: 'main.go', add: 12, del: 3, rows: mockRows, more: 0 }, { path: 'docs/taglines.txt', add: 30, del: 0, rows: mockRows, more: 0 }] }
     : { kind: 'branch', ref: 'feature/ui', current: 'master', isCurrent: false, ahead: 4, behind: 1, add: 420, del: 18, err: '',
         files: [{ path: 'ui/src/App.svelte', add: 300, del: 10 }, { path: 'gui.go', add: 120, del: 8 }],
-        commits: [{ short: '07596a8', subject: 'Move start-screen jokes', author: 'Denis', rel: '2 hours ago' }, { short: '1569d5e', subject: 'Do not listen to the agent again', author: 'Denis', rel: 'yesterday' }] }
+        commits: [{ short: '07596a8', subject: 'Move start-screen jokes', author: 'Denis', rel: '2 hours ago', refs: [{ name: 'feature/ui', kind: 'head' }, { name: 'v0.3', kind: 'tag' }] }, { short: '1569d5e', subject: 'Do not listen to the agent again', author: 'Denis', rel: 'yesterday', refs: [] }, { short: '826a32d', subject: 'Short README for people', author: 'Denis', rel: '3 days ago', refs: [{ name: 'origin/master', kind: 'remote' }] }] }
 export const preview = (kind, value) =>
   window.vPreview
     ? window.vPreview(kind, value)
-    : Promise.resolve(kind === 'log' || kind === 'switch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : mockLines)
+    : Promise.resolve(kind === 'log' || kind === 'branch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : mockLines)
 export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, abs: path, lang: 'Go', lines: mockLines, err: '', text: mockLines.map((l) => l.map((s) => s.t).join('')).join('\n'), crlf: false, mtime: 1, edit: true }))
 export const imageInfo = (path) =>
   window.vImage

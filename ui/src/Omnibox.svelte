@@ -3,7 +3,7 @@
   import Dropdown from './Dropdown.svelte'
 
   // The input at the bottom: plain text goes to the agent, "/" opens command suggestions.
-  let { filtering = false, asking = false, level = $bindable(2), mode = $bindable('agent'), commands, options, onset, note, busy = false, onstop, onshell, workdir, git, branches, prs = [], onbranch, onworkdir, placeholder, onrun, onsend, oninput, onkey: onextra } = $props()
+  let { filtering = false, level = $bindable(2), mode = $bindable('agent'), commands, options, onset, note, busy = false, onstop, onshell, workdir, git, branches, prs = [], onbranch, onworkdir, placeholder, onrun, onsend, oninput, onkey: onextra } = $props()
 
   let text = $state('')
   let sel = $state(0)
@@ -188,8 +188,8 @@
   <form class="prompt" onsubmit={(e) => { e.preventDefault(); submit() }}>
     <div class="field">
       {#if filtering}
-        <span class="ps1 find" class:asking title={asking ? 'Ask the agent (Tab for search)' : 'Type to filter the list; / runs a command (Tab to ask the agent)'} aria-hidden="true">
-          {#if asking}*{:else}<svg viewBox="0 0 16 16" width="14" height="14"><path d="M5.5 3.2 10.3 8l-4.8 4.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
+        <span class="ps1 find" title="Type to filter the list; / runs a command" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M5.5 3.2 10.3 8l-4.8 4.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
       {:else}
       <button type="button" class="ps1" tabindex="-1" title={shellMode ? 'Shell: click or Tab on an empty line for the agent' : 'Agent: click or Tab on an empty line for the shell'} onmousedown={(e) => e.preventDefault()} onclick={toggle}>{shellMode ? '$' : '*'}</button>
@@ -205,11 +205,9 @@
     </div>
     <div class="row">
       <span class="note">{note || (shellMode ? 'Enter to run · ↑ history · Tab on an empty line: back to the agent · Ctrl+C stops' : 'Enter to send · Shift+Enter for a new line')}</span>
-      {#if !shellMode}
-        {#each dropdowns as o (o.key)}
-          <Dropdown option={o} {onset} />
-        {/each}
-      {/if}
+      {#each dropdowns as o (o.key)}
+        <Dropdown option={o} {onset} />
+      {/each}
       {#if busy && !text.trim()}
         <button class="send" type="button" onclick={onstop}>Stop</button>
       {:else}
@@ -273,7 +271,6 @@
   .ps1 { flex: none; width: 14px; padding: 0; background: none; border: 0; color: var(--accent); font: 600 14px/21px var(--mono); text-align: center; cursor: pointer; user-select: none; }
   .card.shell .ps1 { color: var(--accent2); }
   .ps1.find { display: grid; place-items: center; height: 21px; color: var(--accent); cursor: default; }
-  .ps1.find.asking { font: 600 14px/21px var(--mono); }
   textarea.mono { font-family: var(--mono); font-size: 13px; }
   .field { align-items: flex-start; }
 

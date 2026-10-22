@@ -9,7 +9,7 @@
   import { imageInfo } from './api.js'
 
   // A file: as text you can edit (raw), or drawn (Markdown, SVG), or, for a picture, drawn or described.
-  let { file, dirty = $bindable(false), query = '', onclose, onescape } = $props()
+  let { file, dirty = $bindable(false), query = '', mode = $bindable('regexp'), onclose, onescape } = $props()
   let editor
   // Next (1) or previous (-1) match of the omnibox's text in the file.
   export const find = (dir) => editor?.find(dir)
@@ -54,7 +54,7 @@
     {/if}
     <div class="edit" hidden={rendered}>
       {#if file.edit}
-        <Editor bind:this={editor} {file} {query} {onescape} bind:text bind:dirty />
+        <Editor bind:this={editor} {file} {query} bind:mode {onescape} bind:text bind:dirty />
       {:else}
         <div class="body"><Lines lines={file.lines} numbers /></div>
       {/if}

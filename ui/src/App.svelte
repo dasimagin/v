@@ -24,8 +24,8 @@
   let pick = $state(null) // the list of /open and /show
   let previewLines = $state([])
   let openedFile = $state(null)
-  // In the list of files and in a file the omnibox searches; Tab turns it into a question to the agent about that file.
-  let askAbout = $state(false)
+  // How the omnibox searches inside an open file: a regular expression, or fuzzy (the letters in order).
+  let findMode = $state('regexp')
   let fileview = $state() // the open file's view, to search in it
   let fileQuery = $state('')
   let fileDirty = $state(false) // the open file has changes that are not saved
@@ -37,22 +37,18 @@
   let cameFrom = 'home' // the screen to return to from a file
 
   const placeholders = {
-    file: 'Search in the file (a regular expression) · Enter next · Tab: ask the agent · Esc close',
+    file: 'Search in the file · Enter next · Tab: regexp / fuzzy · Esc close',
     pr: 'Filter files or threads · ↑↓ pick · ←→ main / files / threads / CI · Esc back',
     chat: 'Message the agent, or type / for commands · Esc stops a running turn',
     config: 'Search settings · ↑↓ pick · ←→ change · / for commands',
     workdir: 'Type to find a folder · ↑↓ pick · → enter · ← up · Enter choose · Esc back',
     switch: 'Type to find a branch · ↑↓ pick · Enter switch · Esc back',
     resume: 'Type to find a session · ↑↓ pick · Esc back',
-    open: 'Type to find a file · ↑↓ pick · → enter or open · ← up · Tab: ask the agent · Esc back',
+    open: 'Type to find a file · ↑↓ pick · → enter or open · ← up · Esc back',
     show: 'Type to filter commits · ↑↓ pick · Esc back',
   }
-  const placeholder = $derived(
-    askAbout && (screen === 'open' || screen === 'file')
-      ? `Ask the agent about ${aboutPath().split('/').pop() || 'this folder'} · Tab for search`
-      : (placeholders[screen] ?? 'Ask the agent, or type / for commands'),
-  )
-  const picking = $derived(['open', 'log', 'workdir', 'switch', 'resume'].includes(screen))
+  const placeholder = $derived(placeholders[screen] ?? 'Ask the agent, or type / for commands')
+  const picking = $derived(['open', 'log', 'workdir', 'branch', 'resume'].includes(screen))
 
   onMount(async () => {
     onAgent(onagent)
@@ -76,7 +72,8 @@
       } else if (name === 'openfile') {
         onrun('open', '')
         setTimeout(() => choose(4), 300)
-        setTimeout(() => omni?.setText('ma.n|sam'), 700)
+        setTimeout(() => omni?.setText('mn'), 700)
+        setTimeout(() => (findMode = 'fuzzy'), 600)
       } else if (name === 'prci') {
         await startPR('')
         setTimeout(() => prview?.showTab('ci'), 150)
@@ -129,7 +126,7 @@
       case 'open':
       case 'log':
       case 'workdir':
-      case 'switch':
+      case 'branch':
       case 'resume':
         startPicker(name, arg)
         return
@@ -201,10 +198,10 @@
     }
   }
 
-  async function dispatch(text, about = '') {
+  async function dispatch(text) {
     busy = true
     try {
-      await send(text, (about ? about + '\n\n' : '') + shellContext())
+      await send(text, shellContext())
     } catch (err) {
       busy = false
       messages.push({ kind: 'error', text: String(err) })
@@ -224,26 +221,11 @@
       messages.push({ kind: 'note', text: 'queued, sent when the agent finishes: ' + text })
       return
     }
-    // A question about the file in front of you carries the file's path.
-    let about = ''
-    if (askAbout && (screen === 'open' || screen === 'file')) {
-      if (screen === 'file' && fileDirty) return flash('Save the file first (⌘S): leaving it would lose the changes')
-      const p = aboutPath()
-      if (p) {
-        about = `The user is looking at ${screen === 'open' && pick?.items[sel]?.dir ? 'the folder' : 'the file'} ${p} and asks about it:`
-        messages.push({ kind: 'note', text: 'about ' + p.replace(info?.workdir ? info.workdir + '/' : '', '') })
-      }
-      askAbout = false
-    }
     messages.push({ kind: 'user', text })
     screen = 'chat'
-    dispatch(text, about)
+    dispatch(text)
   }
 
-  // The file (or folder) the question is about: the open file, or the selected row of the list.
-  function aboutPath() {
-    return screen === 'file' ? (openedFile?.abs ?? openedFile?.path ?? '') : (pick?.items?.[sel]?.value ?? '')
-  }
 
   async function onanswer(m, allow) {
     m.answer = allow ? 'y' : 'n'
@@ -372,7 +354,7 @@
     const it = pick?.items[i]
     if (!it) return
     if (screen === 'workdir') return chooseWorkdir(it)
-    if (screen === 'switch') return chooseBranch(it)
+    if (screen === 'branch') return chooseBranch(it)
     if (screen === 'resume') return resumeSession(it)
     if (screen === 'log') return
     if (it.dir) return omni?.setText(it.query)
@@ -443,7 +425,6 @@
   }
 
   function closeFile(force = false) {
-    askAbout = false
     omni?.setText('')
     if (fileDirty && !force) return flash('Unsaved changes: save them, or press Esc again to discard them')
     fileDirty = false
@@ -519,8 +500,7 @@
     }
     if (screen === 'file') {
       if (e.key === 'Escape') { leaveFile(); return true }
-      if (e.key === 'Tab') { askAbout = !askAbout; return true } // search <-> ask the agent
-      if (askAbout) return false // Enter sends the question
+      if (e.key === 'Tab') { findMode = findMode === 'regexp' ? 'fuzzy' : 'regexp'; return true }
       // The omnibox searches the file: Enter or the arrows go from match to match.
       if (!text.startsWith('/') && (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
         if (text) fileview?.find(e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey) ? -1 : 1)
@@ -552,11 +532,7 @@
   // /open and /show: the omnibox filters, arrows pick, → enters or opens, ← goes up.
   function onpickkey(e, text) {
     const n = pick?.items.length ?? 0
-    if (e.key === 'Tab' && screen === 'open') {
-      askAbout = !askAbout // search <-> ask the agent about the selected file
-      return true
-    }
-    if (askAbout && screen === 'open') return false // the arrows and Enter are for the question
+
     const open = screen === 'open' || screen === 'workdir'
     switch (e.key) {
       case 'ArrowDown': select(Math.min(sel + 1, n - 1)); return true
@@ -596,10 +572,9 @@
       return
     }
     if (screen === 'file') {
-      if (!askAbout) fileQuery = text
+      fileQuery = text
       return
     }
-    if (askAbout && screen === 'open') return
     if (screen !== 'config' && !picking) return
     query = text.startsWith('/') ? '' : text
     sel = 0
@@ -645,7 +620,7 @@
   {:else if screen === 'chat'}
     <Chat {messages} {busy} {onanswer} bind:level />
   {:else if screen === 'file' && openedFile}
-    <FileView bind:this={fileview} query={fileQuery} file={openedFile} bind:dirty={fileDirty} onclose={() => closeFile(true)} onescape={leaveFile} />
+    <FileView bind:this={fileview} query={fileQuery} bind:mode={findMode} file={openedFile} bind:dirty={fileDirty} onclose={() => closeFile(true)} onescape={leaveFile} />
   {:else}
     <section class="hero">
       <Logo animate={!!info?.animate} />
@@ -658,7 +633,7 @@
   <Omnibox bind:this={omni} commands={info?.commands ?? []} {options} {onset} {note}
     workdir={info?.workdir ?? ''} git={info?.git} branches={branchList} prs={branchPrs} {onbranch} {onworkdir}
     placeholder={placeholder}
-    filtering={screen !== 'home' && screen !== 'chat'} asking={askAbout && (screen === 'open' || screen === 'file')} bind:level bind:mode busy={mode === 'shell' ? !!shellId : busy} onstop={stop} {onshell} {onrun} {onsend} {oninput} {onkey} />
+    filtering={screen !== 'home' && screen !== 'chat'} bind:level bind:mode busy={mode === 'shell' ? !!shellId : busy} onstop={stop} {onshell} {onrun} {onsend} {oninput} {onkey} />
 
 </main>
 

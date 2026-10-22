@@ -1,7 +1,15 @@
 <script>
+  import { copyText } from './copy.js'
+
   // A branch as a card: how it stands against the current branch, what it
   // changes, and a timeline of its latest commits.
   let { d } = $props()
+  let copied = $state(false)
+  async function copy() {
+    await copyText(d.ref)
+    copied = true
+    setTimeout(() => (copied = false), 1400)
+  }
   const dir = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '')
   const base = (p) => p.slice(p.lastIndexOf('/') + 1)
 </script>
@@ -12,7 +20,7 @@
   <article>
     <h2>
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 3.25a1.75 1.75 0 1 1-2.5 1.58v6.34a1.75 1.75 0 1 1 1.5 0V8.5c0-.97.78-1.75 1.75-1.75h3.5a.25.25 0 0 0 .25-.25V4.83a1.75 1.75 0 1 1 1.5 0V6.5A1.75 1.75 0 0 1 9.5 8.25H6a.25.25 0 0 0-.25.25v.67A1.75 1.75 0 0 1 5 3.25Z"/></svg>
-      {d.ref}
+      <button class="name" class:ok={copied} title={copied ? 'Copied' : `Copy ${d.ref}`} onclick={copy}>{copied ? 'copied' : d.ref}</button>
     </h2>
 
     {#if d.isCurrent}
@@ -49,6 +57,9 @@
 <style>
   .err { color: var(--dim); }
   h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; color: var(--strong); word-break: break-all; }
+  .name { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; word-break: break-all; }
+  .name:hover { color: var(--accent); }
+  .name.ok { color: var(--c-added, #98e379); }
   h2 svg { color: var(--accent); flex: none; }
   .state { padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); margin-bottom: 8px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }

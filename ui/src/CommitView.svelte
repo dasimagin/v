@@ -1,4 +1,6 @@
 <script>
+  import { copyText } from './copy.js'
+
   // A commit as a card: who and when, the message, the files with their +/−
   // bars, then each file's patch folded under its name.
   let { d } = $props()
@@ -13,21 +15,12 @@
   const base = (p) => p.slice(p.lastIndexOf('/') + 1)
   let open = $state({})
 
-  // A click on the hash puts the full hash on the clipboard.
-  let copied = $state(false)
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(d.hash)
-    } catch {
-      const t = document.createElement('textarea') // where the clipboard API is not available
-      t.value = d.hash
-      document.body.appendChild(t)
-      t.select()
-      document.execCommand('copy')
-      t.remove()
-    }
-    copied = true
-    setTimeout(() => (copied = false), 1400)
+  // A click on the hash, or on a branch or tag, puts it on the clipboard.
+  let copied = $state('')
+  async function copy(text) {
+    await copyText(text)
+    copied = text
+    setTimeout(() => copied === text && (copied = ''), 1400)
   }
 </script>
 
@@ -41,11 +34,11 @@
         <div class="name">{d.author}</div>
         <div class="when">{d.rel} · {d.date}</div>
       </div>
-      <button class="hash" class:ok={copied} title={copied ? 'Copied' : `Copy ${d.hash}`} onclick={copy}>{copied ? 'copied' : d.short}</button>
+      <button class="hash" class:ok={copied === d.hash} title={copied === d.hash ? 'Copied' : `Copy ${d.hash}`} onclick={() => copy(d.hash)}>{copied === d.hash ? 'copied' : d.short}</button>
     </header>
 
     {#if d.refs?.length}
-      <div class="refs">{#each d.refs as r}<span class="ref {r.kind}">{r.name}</span>{/each}</div>
+      <div class="refs">{#each d.refs as r}<button class="ref {r.kind}" class:copied={copied === r.name} title="Copy {r.name}" onclick={() => copy(r.name)}>{copied === r.name ? 'copied' : r.name}</button>{/each}</div>
     {/if}
     <h2>{d.subject}</h2>
     {#if d.body}<p class="body">{d.body}</p>{/if}
@@ -93,7 +86,9 @@
   .hash.ok { color: var(--c-added, #98e379); }
   .hash { background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 6px; font: 12px var(--mono); }
   .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .ref { padding: 0 8px; border-radius: 999px; font: 11.5px/1.6 var(--mono); border: 1px solid var(--line); color: var(--dim); }
+  .ref { background: none; cursor: pointer; padding: 0 8px; border-radius: 999px; font: 11.5px/1.6 var(--mono); border: 1px solid var(--line); color: var(--dim); }
+  .ref:hover { filter: brightness(1.3); }
+  .ref.copied { color: var(--c-added, #98e379); }
   .ref.head { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
   .ref.branch { color: var(--c-added, #98e379); }
   .ref.remote { color: var(--accent2); }

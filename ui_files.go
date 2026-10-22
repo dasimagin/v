@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 )
@@ -361,10 +363,17 @@ func uiPickPreview(workdir, kind, value string) uiLines {
 }
 
 type uiFile struct {
-	Path  string  `json:"path"`
+	Path  string  `json:"path"` // as shown: with ~ for home
+	Abs   string  `json:"abs"`  // the real path, to act on
 	Lang  string  `json:"lang"`
 	Lines uiLines `json:"lines"`
 	Err   string  `json:"err"`
+
+	// The file as it is, for editing; Edit is false when the page only has a part of it.
+	Text  string `json:"text"`
+	CRLF  bool   `json:"crlf"`  // it uses Windows line ends: they are put back on save
+	Mtime int64  `json:"mtime"` // when it was last written, to notice a change made behind the editor
+	Edit  bool   `json:"edit"`
 }
 
 const (
@@ -374,7 +383,8 @@ const (
 
 // uiReadFile reads a file with syntax highlighting, for the viewer.
 func uiReadFile(path string) uiFile {
-	f := uiFile{Path: tildify(path), Lines: uiLines{}}
+	abs, _ := filepath.Abs(path)
+	f := uiFile{Path: tildify(path), Abs: abs, Lines: uiLines{}}
 	fi, err := os.Stat(path)
 	switch {
 	case err != nil:
@@ -402,9 +412,65 @@ func uiReadFile(path string) uiFile {
 		return f
 	}
 	f.Lang = lang
+	f.Mtime = fi.ModTime().UnixNano()
 	if len(lines) > uiFileMaxLines {
 		lines = append(lines[:uiFileMaxLines], []seg{{"…", chroma.Comment}})
+	} else if utf8.Valid(b) {
+		f.Edit = true
+		f.CRLF = bytes.Contains(b, []byte("\r\n"))
+		f.Text = strings.ReplaceAll(string(b), "\r\n", "\n")
 	}
 	f.Lines = uiLinesOf(lines)
 	return f
+}
+
+// uiSaveFile writes the editor's text over the file. It refuses if the file was changed since it was read
+// (mtime), and keeps the file's mode and, if it had them, its Windows line ends.
+func uiSaveFile(path, text string, crlf bool, mtime int64) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("this is a folder")
+	}
+	if mtime != 0 && fi.ModTime().UnixNano() != mtime {
+		return fmt.Errorf("the file changed on disk after it was opened: reopen it to see the new version")
+	}
+	if crlf {
+		text = strings.ReplaceAll(text, "\n", "\r\n")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".v-save-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(text); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), fi.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// uiFileTime is the file's modification time as uiFile.Mtime has it, after a save.
+func uiFileTime(path string) int64 {
+	if fi, err := os.Stat(path); err == nil {
+		return fi.ModTime().UnixNano()
+	}
+	return 0
+}
+
+// uiHighlight colors text the way the file at path would be, for the editor while you type.
+func uiHighlight(path, text string) uiLines {
+	_, lines, err := highlight(path, text)
+	if err != nil {
+		return uiLines{}
+	}
+	return uiLinesOf(lines)
 }

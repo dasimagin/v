@@ -93,7 +93,7 @@ export const preview = (kind, value) =>
   window.vPreview
     ? window.vPreview(kind, value)
     : Promise.resolve(kind === 'log' || kind === 'switch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : mockLines)
-export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, lang: 'Go', lines: mockLines, err: '' }))
+export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, abs: path, lang: 'Go', lines: mockLines, err: '', text: mockLines.map((l) => l.map((s) => s.t).join('')).join('\n'), crlf: false, mtime: 1, edit: true }))
 export const imageInfo = (path) =>
   window.vImage
     ? window.vImage(path)
@@ -101,6 +101,8 @@ export const imageInfo = (path) =>
         path, name: path.split('/').pop(), mime: path.endsWith('.svg') ? 'image/svg+xml' : 'image/png', size: 48213, width: 192, height: 192, modified: '3 days ago',
         data: 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="#61afef"/><path d="M40 50h28l28 70 28-70h28L110 150H82z" fill="#fff"/></svg>'),
       })
+export const saveFile = (path, text, crlf, mtime) => (window.vSaveFile ? window.vSaveFile(path, text, crlf, mtime) : Promise.resolve(mtime + 1))
+export const highlightText = (path, text) => (window.vHighlight ? window.vHighlight(path, text) : Promise.resolve(text.split('\n').map((t) => [{ t }])))
 export const setWorkdir = (path) => (window.vSetWorkdir ? window.vSetWorkdir(path) : Promise.resolve({ ...sample, workdir: path }))
 
 // The agent: events come back through window.vEvent (see onAgent).

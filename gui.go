@@ -110,6 +110,18 @@ func openWindow(startDir string) error {
 	}); err != nil {
 		return err
 	}
+	// Editing a file: save writes it (and returns its new mtime), highlight colors the text as you type.
+	if err := w.Bind("vSaveFile", func(path, text string, crlf bool, mtime int64) (int64, error) {
+		if err := uiSaveFile(path, text, crlf, mtime); err != nil {
+			return 0, err
+		}
+		return uiFileTime(path), nil
+	}); err != nil {
+		return err
+	}
+	if err := w.Bind("vHighlight", uiHighlight); err != nil {
+		return err
+	}
 	if err := w.Bind("vImage", uiImageOf); err != nil {
 		return err
 	}

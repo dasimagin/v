@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestUIPickListOpen(t *testing.T) {
@@ -190,5 +191,34 @@ func TestUICrumbs(t *testing.T) {
 	}
 	if up := uiCrumbs(work, filepath.Join(home, "a")); up[len(up)-1].Query != "~/a/" {
 		t.Errorf("a folder above the workdir is typed with ~: %+v", up)
+	}
+}
+
+func TestUISaveFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.go")
+	os.WriteFile(p, []byte("package a\r\n\r\nfunc A() {}\r\n"), 0o640)
+	f := uiReadFile(p)
+	if !f.Edit || !f.CRLF || f.Text != "package a\n\nfunc A() {}\n" || f.Abs != p {
+		t.Fatalf("read: %+v", f)
+	}
+	if err := uiSaveFile(p, f.Text+"// more\n", f.CRLF, f.Mtime); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if string(b) != "package a\r\n\r\nfunc A() {}\r\n// more\r\n" {
+		t.Errorf("saved with Windows line ends: %q", b)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
+		t.Errorf("the mode is kept: %v", fi.Mode())
+	}
+	// The file changed after f was read: the save must refuse.
+	os.WriteFile(p, []byte("other"), 0o640)
+	os.Chtimes(p, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+	if err := uiSaveFile(p, "mine", false, f.Mtime); err == nil {
+		t.Error("a save over a changed file must be refused")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("no temp files are left: %v", entries)
 	}
 }

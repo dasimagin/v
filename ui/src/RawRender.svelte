@@ -4,12 +4,12 @@
   // raw | render for a file of this kind (md, svg or img): the text, or the page or picture it makes.
   // For a picture, raw is its properties.
   let { kind } = $props()
-  const raw = $derived(kind === 'img' ? 'The properties of the picture (Tab)' : 'The source (Tab)')
+  const raw = $derived(kind === 'img' ? 'The properties of the picture (Alt+R)' : 'The source (Alt+R)')
 </script>
 
 <span class="seg" role="group" aria-label="Raw or rendered">
   <button class:on={!view[kind]} title={raw} onclick={() => setRender(kind, false)} onmousedown={(e) => e.preventDefault()}>raw</button>
-  <button class:on={view[kind]} title="Rendered (Tab)" onclick={() => setRender(kind, true)} onmousedown={(e) => e.preventDefault()}>render</button>
+  <button class:on={view[kind]} title="Rendered (Alt+R)" onclick={() => setRender(kind, true)} onmousedown={(e) => e.preventDefault()}>render</button>
 </span>
 
 <style>

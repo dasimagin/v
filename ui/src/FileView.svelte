@@ -3,23 +3,45 @@
   import Markdown from './Markdown.svelte'
   import ImageView from './ImageView.svelte'
   import RawRender from './RawRender.svelte'
+  import Editor from './Editor.svelte'
   import { linesToText } from './markdown.js'
   import { view, kindOf } from './prefs.svelte.js'
   import { imageInfo } from './api.js'
 
-  let { file, onclose } = $props()
+  // A file: as text you can edit (raw), or drawn (Markdown, SVG), or, for a picture, drawn or described.
+  let { file, dirty = $bindable(false), query = '', onclose } = $props()
+  let editor
+  // Next (1) or previous (-1) match of the omnibox's text in the file.
+  export const find = (dir) => editor?.find(dir)
 
-  // Markdown can be drawn, an SVG too, a picture is drawn or described.
   const kind = $derived(kindOf(file.path))
+  const rendered = $derived((kind === 'md' && view.md) || (kind === 'svg' && view.svg))
+  let text = $state('') // what the editor holds right now, saved or not
   let picture = $state(null)
   let seq = 0
   $effect(() => {
-    const path = file.path
+    const path = file.abs ?? file.path
     picture = null
     if (kind !== 'img' && kind !== 'svg') return
     const my = ++seq
     imageInfo(path).then((i) => my === seq && (picture = i))
   })
+
+  // The SVG as it is being edited, for the drawn view.
+  const svgInfo = $derived(
+    picture && file.edit && dirty ? { ...picture, data: 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text))) } : picture,
+  )
+  const source = $derived(file.edit ? text : linesToText(file.lines))
+
+  let leaving = $state(false) // Close was clicked once with unsaved changes
+  function close() {
+    if (dirty && !leaving) {
+      leaving = true
+      setTimeout(() => (leaving = false), 3000)
+      return
+    }
+    onclose()
+  }
 </script>
 
 <section class="file">
@@ -28,18 +50,25 @@
     {#if file.lang}<span class="lang">{file.lang}</span>{/if}
     <span class="spacer"></span>
     {#if kind}<RawRender {kind} />{/if}
-    <button onclick={onclose} title="Close (Esc)">Close</button>
+    <button class:warn={leaving} onclick={close} title="Close (Esc)">{leaving ? 'Discard changes?' : 'Close'}</button>
   </header>
   {#if kind === 'img'}
     <div class="body">{#if picture}<ImageView info={picture} drawn={view.img} />{/if}</div>
-  {:else if kind === 'svg' && view.svg && picture}
-    <div class="body"><ImageView info={picture} drawn /></div>
   {:else if file.err}
     <div class="err">{file.err}</div>
-  {:else if kind === 'md' && view.md}
-    <div class="body"><Markdown text={linesToText(file.lines)} /></div>
   {:else}
-    <div class="body"><Lines lines={file.lines} numbers /></div>
+    {#if rendered}
+      <div class="body">
+        {#if kind === 'md'}<Markdown text={source} />{:else if svgInfo}<ImageView info={svgInfo} drawn />{/if}
+      </div>
+    {/if}
+    <div class="edit" hidden={rendered}>
+      {#if file.edit}
+        <Editor bind:this={editor} {file} {query} bind:text bind:dirty />
+      {:else}
+        <div class="body"><Lines lines={file.lines} numbers /></div>
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -58,8 +87,11 @@
   .path { color: var(--strong); font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lang { color: var(--dim); font-size: 12px; }
   .spacer { flex: 1; }
-  button { background: none; border: 0; border-radius: 6px; padding: 3px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }
-  button:hover { color: var(--text); background: var(--raised); }
+  header button { background: none; border: 0; border-radius: 6px; padding: 3px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }
+  header button:hover { color: var(--text); background: var(--raised); }
+  header button.warn { color: var(--c-deleted); }
   .body { flex: 1; min-height: 0; overflow: auto; padding: 10px 4px; }
+  .edit { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .edit[hidden] { display: none; }
   .err { padding: 16px 4px; color: var(--dim); }
 </style>

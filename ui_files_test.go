@@ -212,6 +212,9 @@ func TestUISaveFile(t *testing.T) {
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
 		t.Errorf("the mode is kept: %v", fi.Mode())
 	}
+	if f.Mtime > 1<<53 {
+		t.Errorf("mtime %d does not survive a trip through JavaScript", f.Mtime)
+	}
 	// The file changed after f was read: the save must refuse.
 	os.WriteFile(p, []byte("other"), 0o640)
 	os.Chtimes(p, time.Now().Add(time.Hour), time.Now().Add(time.Hour))

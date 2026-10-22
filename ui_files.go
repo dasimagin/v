@@ -398,7 +398,7 @@ type uiFile struct {
 	// The file as it is, for editing; Edit is false when the page only has a part of it.
 	Text  string `json:"text"`
 	CRLF  bool   `json:"crlf"`  // it uses Windows line ends: they are put back on save
-	Mtime int64  `json:"mtime"` // when it was last written, to notice a change made behind the editor
+	Mtime int64  `json:"mtime"` // when it was last written, in milliseconds (nanoseconds do not fit a JavaScript number), to notice a change made behind the editor
 	Edit  bool   `json:"edit"`
 }
 
@@ -438,7 +438,7 @@ func uiReadFile(path string) uiFile {
 		return f
 	}
 	f.Lang = lang
-	f.Mtime = fi.ModTime().UnixNano()
+	f.Mtime = fi.ModTime().UnixMilli()
 	if len(lines) > uiFileMaxLines {
 		lines = append(lines[:uiFileMaxLines], []seg{{"…", chroma.Comment}})
 	} else if utf8.Valid(b) {
@@ -460,7 +460,7 @@ func uiSaveFile(path, text string, crlf bool, mtime int64) error {
 	if fi.IsDir() {
 		return fmt.Errorf("this is a folder")
 	}
-	if mtime != 0 && fi.ModTime().UnixNano() != mtime {
+	if mtime != 0 && fi.ModTime().UnixMilli() != mtime {
 		return fmt.Errorf("the file changed on disk after it was opened: reopen it to see the new version")
 	}
 	if crlf {
@@ -487,7 +487,7 @@ func uiSaveFile(path, text string, crlf bool, mtime int64) error {
 // uiFileTime is the file's modification time as uiFile.Mtime has it, after a save.
 func uiFileTime(path string) int64 {
 	if fi, err := os.Stat(path); err == nil {
-		return fi.ModTime().UnixNano()
+		return fi.ModTime().UnixMilli()
 	}
 	return 0
 }

@@ -76,6 +76,9 @@
       } else if (['openmd', 'opensvg', 'openpng', 'openjson'].includes(name)) {
         onrun('open', '')
         setTimeout(() => select({ openmd: 1, opensvg: 2, openpng: 3, openjson: 5 }[name]), 300)
+      } else if (name === 'opensplit') {
+        onrun('open', '')
+        setTimeout(() => omni?.setText('u'), 300)
       } else if (name === 'openfile') {
         onrun('open', '')
         setTimeout(() => choose(4), 300)

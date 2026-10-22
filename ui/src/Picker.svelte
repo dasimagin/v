@@ -54,6 +54,9 @@
     {#if pick?.dir && !pick?.crumbs?.length}<div class="dir">{pick.dir}</div>{/if}
     {#if pick?.err}<div class="msg">{pick.err}</div>{/if}
     {#each pick?.items ?? [] as it, i (it.value)}
+      {#if it.below && !pick.items[i - 1]?.below}
+        <div class="split" role="separator"><span>below</span></div>
+      {/if}
       <button class="row" class:on={i === sel} class:isdir={it.dir} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
         {#if kind === 'branch'}
           <span class="top">
@@ -126,6 +129,10 @@
   .list, .pane { min-height: 0; overflow: auto; }
   .pane { border-left: 1px solid var(--divider); padding: 0 0 0 16px; }
 
+  /* Matches in this folder above, matches in the folders below under the line. */
+  .split { display: flex; align-items: center; gap: 8px; margin: 8px 10px 6px; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .split::before, .split::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+  .split::before { flex: 0 0 8px; }
   .dir { padding: 2px 10px 8px; color: var(--dim); font: 12px var(--mono); }
   .msg { padding: 8px 10px; color: var(--dim); }
   .row {

@@ -226,7 +226,7 @@ func TestUISaveFile(t *testing.T) {
 	}
 }
 
-func TestUIOpenSuggestsFromBelow(t *testing.T) {
+func TestUIOpenSplitsThisFolderAndBelow(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "ui", "src"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "node_modules", "x"), 0o755)
@@ -235,13 +235,25 @@ func TestUIOpenSuggestsFromBelow(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "node_modules", "x", "picker.js"), nil, 0o644)
 	projectFiles.dir = "" // forget what an earlier test saw
 	p := uiPickList(dir, "open", "pick")
-	if len(p.Items) != 1 || p.Items[0].Label != "Picker.svelte" || p.Items[0].Meta != "ui/src/" {
-		t.Fatalf("suggestions: %+v", p.Items)
+	if len(p.Items) != 1 || p.Items[0].Label != "Picker.svelte" || p.Items[0].Meta != "ui/src/" || !p.Items[0].Below {
+		t.Fatalf("a file below: %+v", p.Items)
 	}
 	if p.Items[0].Value != filepath.Join(dir, "ui", "src", "Picker.svelte") {
 		t.Errorf("it opens by its real path: %q", p.Items[0].Value)
 	}
-	if p := uiPickList(dir, "open", ""); len(p.Items) != 3 {
+	// A folder below is found too, and a match in this folder comes before the ones below.
+	p = uiPickList(dir, "open", "src")
+	if len(p.Items) < 1 || p.Items[0].Label != "src/" || !p.Items[0].Dir || p.Items[0].Query != "ui/src/" || !p.Items[0].Below {
+		t.Errorf("a folder below: %+v", p.Items)
+	}
+	p = uiPickList(dir, "open", "u")
+	if len(p.Items) < 2 || p.Items[0].Label != "ui/" || p.Items[0].Below || !p.Items[len(p.Items)-1].Below {
+		t.Errorf("this folder first, then below: %+v", p.Items)
+	}
+	if p := uiPickList(dir, "open", ""); len(p.Items) != 3 || p.Items[0].Below {
 		t.Errorf("without a query only this folder is listed: %+v", p.Items)
+	}
+	if p := uiPickList(dir, "workdir", "src"); len(p.Items) != 1 || !p.Items[0].Dir || p.Items[0].Label != "src/" {
+		t.Errorf("/workdir looks for folders only: %+v", p.Items)
 	}
 }

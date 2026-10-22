@@ -80,11 +80,12 @@ type uiItem struct {
 	Label string   `json:"label"`
 	Meta  string   `json:"meta"`
 	Dir   bool     `json:"dir"`
-	Query string   `json:"query"`          // /open: what to type to go into the folder
-	Tag   string   `json:"tag"`            // /branch: "current", "local" or "remote"
-	Sub   string   `json:"sub"`            // /branch: the branch's latest commit
-	When  string   `json:"when"`           // /branch: how long ago
-	Refs  []logRef `json:"refs,omitempty"` // /log: the tags and the other branches on the commit
+	Query string   `json:"query"`           // /open: what to type to go into the folder
+	Tag   string   `json:"tag"`             // /branch: "current", "local" or "remote"
+	Sub   string   `json:"sub"`             // /branch: the branch's latest commit
+	When  string   `json:"when"`            // /branch: how long ago
+	Refs  []logRef `json:"refs,omitempty"`  // /log: the tags and the other branches on the commit
+	Below bool     `json:"below,omitempty"` // /open: a match from the folders below, not from this folder
 }
 
 // uiCrumb is one folder of the path above the list: its name, and what to type to list it.
@@ -194,35 +195,41 @@ func uiPickList(workdir, kind, query string) uiPick {
 		}
 		found = append(found, scored{it, score})
 	}
-	// Something is typed: suggest matches from the folders below too, not only the ones in this folder.
-	if kind == "open" && strings.TrimSpace(needle) != "" {
-		have := map[string]bool{}
-		for _, x := range found {
-			have[x.Value] = true
-		}
-		for _, rel := range uiProjectFiles(dir) {
-			if !strings.Contains(rel, "/") {
-				continue // the files of this folder are listed above
-			}
-			path := filepath.Join(dir, rel)
-			if have[path] {
-				continue
-			}
-			if score, ok := fuzzyScore(needle, rel); ok {
-				// The file name is the label; the folders it is in come under it.
-				found = append(found, scored{uiItem{Value: path, Label: filepath.Base(rel), Meta: filepath.Dir(rel) + "/"}, score - 1})
-			}
-			if len(found) > 20000 {
-				break
-			}
-		}
-	}
 	sort.SliceStable(found, func(i, j int) bool {
 		if found[i].score != found[j].score {
 			return found[i].score > found[j].score
 		}
 		return found[i].Dir && !found[j].Dir
 	})
+	// Something is typed: under the matches of this folder, set off by a line, what matches in the folders
+	// below (their folders and files, fuzzy over the whole relative path).
+	var below []scored
+	if strings.TrimSpace(needle) != "" {
+		for _, c := range uiProjectEntries(dir) {
+			if !strings.Contains(strings.TrimSuffix(c.rel, "/"), "/") {
+				continue // the entries of this folder are above
+			}
+			if kind == "workdir" && !c.dir {
+				continue
+			}
+			score, ok := fuzzyScore(needle, strings.TrimSuffix(c.rel, "/"))
+			if !ok {
+				continue
+			}
+			path := filepath.Join(dir, c.rel)
+			name := filepath.Base(path)
+			it := uiItem{Value: path, Label: name, Meta: filepath.Dir(strings.TrimSuffix(c.rel, "/")) + "/", Dir: c.dir, Below: true}
+			if c.dir {
+				it.Label += "/"
+				it.Query = queryFor(workdir, path)
+			}
+			below = append(below, scored{it, score})
+		}
+		sort.SliceStable(below, func(i, j int) bool { return below[i].score > below[j].score })
+		if len(below) > uiPickMax {
+			below = below[:uiPickMax]
+		}
+	}
 	if kind == "workdir" && needle == "" {
 		pick.Items = append(pick.Items, uiItem{Value: dir, Label: "· this folder", Meta: tildify(dir)})
 	}
@@ -230,6 +237,9 @@ func uiPickList(workdir, kind, query string) uiPick {
 		if len(pick.Items) == uiPickMax {
 			break
 		}
+		pick.Items = append(pick.Items, f.uiItem)
+	}
+	for _, f := range below {
 		pick.Items = append(pick.Items, f.uiItem)
 	}
 	return pick
@@ -501,14 +511,21 @@ func uiHighlight(path, text string) uiLines {
 	return uiLinesOf(lines)
 }
 
-// uiProjectFiles lists the files below dir, as paths relative to it: the ones Git knows (and the untracked
-// ones it does not ignore) in a repository, else a walk that skips hidden folders and the usual heaps.
-// The answer is kept for a few seconds, as it is asked for on every key typed.
-func uiProjectFiles(dir string) []string {
+// projectEntry is a file or a folder below the listed folder: rel is its path from it, with a slash at
+// the end for a folder.
+type projectEntry struct {
+	rel string
+	dir bool
+}
+
+// uiProjectEntries lists the files below dir and the folders that hold them: the files Git knows (and the
+// untracked ones it does not ignore) in a repository, else a walk that skips hidden folders and the usual
+// heaps. The answer is kept for a few seconds, as it is asked for on every key typed.
+func uiProjectEntries(dir string) []projectEntry {
 	projectFiles.Lock()
 	defer projectFiles.Unlock()
 	if projectFiles.dir == dir && time.Since(projectFiles.at) < 20*time.Second {
-		return projectFiles.files
+		return projectFiles.entries
 	}
 	var files []string
 	if out, err := gitOutput(dir, "ls-files", "--cached", "--others", "--exclude-standard"); err == nil && out != "" {
@@ -538,13 +555,24 @@ func uiProjectFiles(dir string) []string {
 			return nil
 		})
 	}
-	projectFiles.dir, projectFiles.at, projectFiles.files = dir, time.Now(), files
-	return files
+	var entries []projectEntry
+	seen := map[string]bool{}
+	for _, f := range files {
+		for i := 0; i < len(f); i++ {
+			if f[i] == '/' && !seen[f[:i+1]] {
+				seen[f[:i+1]] = true
+				entries = append(entries, projectEntry{f[:i+1], true})
+			}
+		}
+		entries = append(entries, projectEntry{f, false})
+	}
+	projectFiles.dir, projectFiles.at, projectFiles.entries = dir, time.Now(), entries
+	return entries
 }
 
 var projectFiles struct {
 	sync.Mutex
-	dir   string
-	at    time.Time
-	files []string
+	dir     string
+	at      time.Time
+	entries []projectEntry
 }

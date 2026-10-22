@@ -70,7 +70,7 @@ export const list = (kind, query) =>
             ]
           : kind === 'branch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]
-          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }, { value: '/x/package.json', label: 'package.json' }].filter((i) => i.label.includes(query.split('/').pop())),
+          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }, { value: '/x/package.json', label: 'package.json' }, { value: '/x/ui/src', label: 'src/', dir: true, query: 'ui/src/', meta: 'ui/', below: true }, { value: '/x/ui/src/Picker.svelte', label: 'Picker.svelte', meta: 'ui/src/', below: true }].filter((i) => i.below ? query.length > 0 && /[ui]/i.test(query) : i.label.includes(query.split('/').pop())),
       })
 const mockMd = [
   '# Vibing', '', 'A **graphical** front end for `v`, with *tabs*, tables and [a link](https://example.com).', '', '## Features', '', '- Chat with the agent', '- Shell mode', '  - runs in a pty', '1. First', '2. Second', '',

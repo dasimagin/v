@@ -209,7 +209,13 @@
       {#if filtering}
         <!-- A list or a file: the agent is not asked here, so its settings and Send are out; the search's own choice is here. -->
         <span class="note">{note || ''}</span>
-        {#if searchOption}<Dropdown option={searchOption} onset={onsearch} />{/if}
+        {#if searchOption}
+          <span class="seg" role="radiogroup" aria-label={searchOption.label}>
+            {#each searchOption.choices as c (c.id)}
+              <button type="button" role="radio" aria-checked={c.id === searchOption.current} class:on={c.id === searchOption.current} title="{c.name} (Tab)" onmousedown={(e) => e.preventDefault()} onclick={() => onsearch(searchOption.key, c.id)}>{c.name}</button>
+            {/each}
+          </span>
+        {/if}
       {:else}
         <span class="note">{note || (shellMode ? 'Enter to run · ↑ history · Tab on an empty line: back to the agent · Ctrl+C stops' : 'Enter to send · Shift+Enter for a new line')}</span>
         {#each dropdowns as o (o.key)}
@@ -335,6 +341,10 @@
   }
   textarea::placeholder { color: var(--dim); }
 
+  .seg { display: flex; padding: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+  .seg button { background: none; border: 0; border-radius: 5px; padding: 1px 11px; color: var(--dim); cursor: pointer; }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
   .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 28px; }
   .note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 12px; }
 

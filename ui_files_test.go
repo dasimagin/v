@@ -57,7 +57,7 @@ func TestUIPickListWorkdirAndSwitch(t *testing.T) {
 	if got := uiPickList(dir, "workdir", "a").Items; len(got) != 1 || got[0].Label != "a/" {
 		t.Errorf("workdir fuzzy = %+v", got)
 	}
-	if p := uiPickList(dir, "switch", ""); p.Err == "" {
+	if p := uiPickList(dir, "branch", ""); p.Err == "" {
 		t.Errorf("switch outside a repository should say so, got %+v", p)
 	}
 

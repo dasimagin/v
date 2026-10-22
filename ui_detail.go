@@ -144,13 +144,14 @@ func hunkStart(s string) int {
 }
 
 type uiBranchCommit struct {
-	Short   string `json:"short"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	Rel     string `json:"rel"`
+	Short   string   `json:"short"`
+	Subject string   `json:"subject"`
+	Author  string   `json:"author"`
+	Rel     string   `json:"rel"`
+	Refs    []logRef `json:"refs"` // the tags and other branches on it
 }
 
-// uiBranchDetail is what the /switch pane draws: how the branch relates to the
+// uiBranchDetail is what the /branch pane draws: how the branch relates to the
 // current one, what it changes, and its latest commits.
 type uiBranchDetail struct {
 	Kind    string           `json:"kind"`
@@ -170,14 +171,14 @@ func uiBranchOf(dir, ref string) uiBranchDetail {
 	d := uiBranchDetail{Kind: "branch", Ref: ref, Files: []uiFileDiff{}, Commits: []uiBranchCommit{}}
 	cur, _ := gitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	d.Current, d.IsCur = cur, cur == ref
-	out, err := gitOutput(dir, "log", "-n", "30", "--format=%h%x1f%s%x1f%an%x1f%cr", ref, "--")
+	out, err := gitOutput(dir, "log", "-n", "30", "--decorate=short", "--format=%h%x1f%s%x1f%an%x1f%cr%x1f%D", ref, "--")
 	if err != nil {
 		d.Err = err.Error()
 		return d
 	}
 	for _, l := range strings.Split(out, "\n") {
-		if f := strings.SplitN(l, "\x1f", 4); len(f) == 4 {
-			d.Commits = append(d.Commits, uiBranchCommit{f[0], f[1], f[2], f[3]})
+		if f := strings.SplitN(l, "\x1f", 5); len(f) == 5 {
+			d.Commits = append(d.Commits, uiBranchCommit{f[0], f[1], f[2], f[3], parseRefs(f[4], gitRemotes(dir))})
 		}
 	}
 	if d.IsCur || cur == "" {

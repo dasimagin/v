@@ -81,9 +81,9 @@ type uiItem struct {
 	Meta  string   `json:"meta"`
 	Dir   bool     `json:"dir"`
 	Query string   `json:"query"`          // /open: what to type to go into the folder
-	Tag   string   `json:"tag"`            // /switch: "current", "local" or "remote"
-	Sub   string   `json:"sub"`            // /switch: the branch's latest commit
-	When  string   `json:"when"`           // /switch: how long ago
+	Tag   string   `json:"tag"`            // /branch: "current", "local" or "remote"
+	Sub   string   `json:"sub"`            // /branch: the branch's latest commit
+	When  string   `json:"when"`           // /branch: how long ago
 	Refs  []logRef `json:"refs,omitempty"` // /log: the tags and the other branches on the commit
 }
 
@@ -140,12 +140,12 @@ func uiCrumbs(workdir, dir string) []uiCrumb {
 	return out
 }
 
-// kind is "open", "workdir", "log", "switch" or "resume".
+// kind is "open", "workdir", "log", "branch" or "resume".
 func uiPickList(workdir, kind, query string) uiPick {
 	switch kind {
 	case "log":
 		return uiLogList(workdir, query)
-	case "switch":
+	case "branch":
 		return uiSwitchList(workdir, query)
 	case "resume":
 		return uiResumeList(workdir, query)
@@ -379,7 +379,7 @@ func uiPickPreview(workdir, kind, value string) uiLines {
 	switch kind {
 	case "log":
 		return uiLinesOf(commitPreview(workdir, value))
-	case "switch":
+	case "branch":
 		return uiLinesOf(branchPreview(workdir, value))
 	case "resume":
 		return uiSessionPreview(workdir, value)

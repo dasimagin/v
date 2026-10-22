@@ -30,7 +30,7 @@ var commands = []*Command{
 		Run: (*model).cmdWorkdir,
 	},
 	{
-		Name: "switch", Aliases: []string{"branch"}, Args: "[name]", Desc: "Find and switch Git branches", Run: (*model).cmdSwitch,
+		Name: "branch", Aliases: []string{"switch"}, Args: "[name]", Desc: "Find and switch Git branches", Run: (*model).cmdSwitch,
 	},
 	{
 		Name: "log", Aliases: []string{"show"}, Desc: "Browse the history of this branch with its tags, the other branches on it and a graph", Run: (*model).cmdShow,

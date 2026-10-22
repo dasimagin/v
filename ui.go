@@ -113,7 +113,7 @@ func uiPaletteOf(id string) uiPalette {
 }
 
 // uiSupported are the commands the graphical UI can run so far.
-var uiSupported = []string{"config", "open", "log", "workdir", "switch", "resume", "pr", "reset", "quit"}
+var uiSupported = []string{"config", "open", "log", "workdir", "branch", "resume", "pr", "reset", "quit"}
 
 func newUIStart(dir string) uiStart {
 	s, _ := loadSettings()

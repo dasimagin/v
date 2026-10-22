@@ -103,7 +103,7 @@ func openWindow(startDir string) error {
 		switch kind {
 		case "log":
 			return uiCommitOf(wd.get(), value)
-		case "switch":
+		case "branch":
 			return uiBranchOf(wd.get(), value)
 		}
 		return uiPickPreview(wd.get(), kind, value)

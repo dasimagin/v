@@ -54,9 +54,8 @@
     {#if pick?.err}<div class="msg">{pick.err}</div>{/if}
     {#each pick?.items ?? [] as it, i (it.value)}
       <button class="row" class:on={i === sel} class:isdir={it.dir} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
-        {#if kind === 'switch'}
+        {#if kind === 'branch'}
           <span class="top">
-            <svg class="bi" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M5 3.25a1.75 1.75 0 1 1-2.5 1.58v6.34a1.75 1.75 0 1 1 1.5 0V8.5c0-.97.78-1.75 1.75-1.75h3.5a.25.25 0 0 0 .25-.25V4.83a1.75 1.75 0 1 1 1.5 0V6.5A1.75 1.75 0 0 1 9.5 8.25H6a.25.25 0 0 0-.25.25v.67A1.75 1.75 0 0 1 5 3.25Z"/></svg>
             <span class="label">{it.label}</span>
             {#if it.tag === 'current'}<span class="badge cur">current</span>{:else if it.tag === 'remote'}<span class="badge">remote</span>{/if}
           </span>
@@ -77,7 +76,7 @@
   <div class="pane">
     {#if kind === 'log' && preview?.kind === 'commit'}
       <CommitView d={preview} />
-    {:else if kind === 'switch' && preview?.kind === 'branch'}
+    {:else if kind === 'branch' && preview?.kind === 'branch'}
       <BranchView d={preview} />
     {:else if fileKind === 'md' && view.md && Array.isArray(preview)}
       <Markdown text={linesToText(preview)} />
@@ -141,8 +140,6 @@
   .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--strong); }
   .isdir .label { color: var(--accent); }
   .top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .bi { flex: none; color: var(--dim); }
-  .on .bi { color: var(--accent); }
   .badge { flex: none; margin-left: auto; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 11px; }
   .badge.cur { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
   .logtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }

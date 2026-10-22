@@ -47,7 +47,7 @@ func (m *model) helpFor() (string, []helpRow) {
 		}, global...)
 	}
 	return "Chat", append([]helpRow{
-		{"/", "commands: /pr  /review  /apply  /open  /show  /switch  /workdir  /config"},
+		{"/", "commands: /pr  /review  /apply  /open  /log  /switch  /workdir  /config"},
 		{"↑ ↓", "history of what you typed"},
 		{"ctrl+b  ctrl+p", "branches, the PR"},
 		{"ctrl+t", "view mode of diffs (flat, unified, side-by-side)"},

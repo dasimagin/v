@@ -30,7 +30,8 @@ type workspacePicker struct {
 	cycling          bool
 	want             string // directory to highlight after the next rebuild
 	err              string
-	commits          []commit // /show
+	commits          []logCommit // /log: the history of all branches
+	graph            []graphRow  // and where each commit sits in it
 	loaded           bool
 	pscroll          int // preview scroll
 	pkey             string
@@ -158,14 +159,25 @@ func (m *model) rebuildPicker() {
 		if !p.loaded {
 			p.loaded = true
 			var err error
-			if p.commits, err = loadCommits(m.workdir); err != nil {
+			if p.commits, err = loadLog(m.workdir); err != nil {
 				p.err = "No history here · " + err.Error()
 			}
+			p.graph = buildGraph(p.commits)
 		}
-		for _, c := range p.commits {
+		width := 0
+		for _, g := range p.graph {
+			width = max(width, min(g.Lanes, graphMaxLanes))
+		}
+		for i, c := range p.commits {
 			score, ok := fuzzyScore(p.query, c.Short+" "+c.Subject+" "+c.Author)
 			if ok {
-				p.items = append(p.items, pickItem{value: c.Hash, label: c.Short + "  " + c.Subject, score: score})
+				// The graph only makes sense while every commit is listed.
+				label := c.Short + "  " + refsText(c.Refs) + c.Subject
+				if strings.TrimSpace(p.query) == "" && i < len(p.graph) {
+					g := p.graph[i].text(width)
+					label = g + strings.Repeat(" ", max(0, width*2-len([]rune(g)))) + " " + label
+				}
+				p.items = append(p.items, pickItem{value: c.Hash, label: label, score: score})
 			}
 		}
 	} else {
@@ -458,7 +470,7 @@ func (m *model) openBare(kind string) (*workspacePicker, tea.Cmd) {
 	return m.picker, m.omni.Focus()
 }
 
-// cmdShow opens the history screen; the omnibox is then its search field.
+// cmdShow opens the log screen (/log, or /show); the omnibox is then its search field.
 func (m *model) cmdShow(string) tea.Cmd {
 	if m.perm != nil {
 		m.setErr("answer the agent's request before browsing history")
@@ -529,7 +541,7 @@ func (m *model) renderPicker(rows int) []string {
 	case "open":
 		title = "Open file"
 	case "show":
-		title = "Branch history"
+		title = "Log"
 	case "prdiff":
 		title = "Pull request"
 		if p.pr != nil {

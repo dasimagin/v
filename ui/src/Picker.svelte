@@ -55,7 +55,7 @@
     {#if pick?.err}<div class="msg">{pick.err}</div>{/if}
     {#each pick?.items ?? [] as it, i (it.value)}
       {#if it.below && !pick.items[i - 1]?.below}
-        <div class="split" role="separator"><span>below</span></div>
+        <div class="split" role="separator"><span>search</span></div>
       {/if}
       <button class="row" class:on={i === sel} class:isdir={it.dir} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
         {#if kind === 'branch'}

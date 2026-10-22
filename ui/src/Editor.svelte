@@ -4,7 +4,8 @@
 
   // The file as text you can change. A transparent <textarea> lies over the highlighted lines, so
   // the colors show through while you type (they catch up a moment after you stop).
-  let { file, text = $bindable(''), dirty = $bindable(false), query = '' } = $props()
+  let { file, text = $bindable(''), dirty = $bindable(false), query = '', onescape } = $props()
+  const mod = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
   // svelte-ignore state_referenced_locally
   let saved = $state(file.text)
@@ -128,7 +129,10 @@
   }
 
   function key(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onescape?.()
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
       e.preventDefault()
       save()
     } else if (e.key === 'Tab' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -158,7 +162,7 @@
   {#if err}<div class="err">{err}</div>{/if}
   <div class="status">
     <span class:dirty>{dirty ? '● unsaved' : note || 'saved'}{#if q}{' '}· {marks.length ? `${cur + 1}/${marks.length}` : 'no matches'}{/if}</span>
-    <button class="save" disabled={!dirty || busy} onclick={save}>{busy ? 'Saving…' : 'Save'} <kbd>⌘S</kbd></button>
+    <button class="save" disabled={!dirty || busy} onclick={save} title="Save the file">{busy ? 'Saving…' : mod + 'S'}</button>
   </div>
   <div class="scroll" bind:this={scroller}>
     <div class="gutter" aria-hidden="true">{#each lines as _, i}<div>{i + 1}</div>{/each}</div>
@@ -184,9 +188,8 @@
   .ed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .status { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 6px 4px; color: var(--dim); font-size: 12px; }
   .status .dirty { color: var(--accent2); }
-  .save { background: var(--accent-soft); color: var(--accent); border: 0; border-radius: 6px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+  .save { background: var(--accent-soft); color: var(--accent); border: 0; border-radius: 6px; padding: 2px 10px; font: 12px var(--mono); cursor: pointer; }
   .save:disabled { opacity: 0.45; cursor: default; }
-  kbd { font: 11px var(--mono); opacity: 0.8; }
   .err { margin: 4px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--c-deleted) 45%, var(--line)); border-radius: 6px; color: var(--c-deleted); font-size: 12.5px; }
   .scroll { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: flex-start; font: 12.5px/1.55 var(--mono); }
   .gutter { position: sticky; left: 0; z-index: 1; flex: none; padding: 0 12px 0 4px; min-width: 4.5ch; text-align: right; color: var(--dim); opacity: 0.8; background: var(--bg); user-select: none; }

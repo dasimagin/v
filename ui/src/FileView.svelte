@@ -9,7 +9,7 @@
   import { imageInfo } from './api.js'
 
   // A file: as text you can edit (raw), or drawn (Markdown, SVG), or, for a picture, drawn or described.
-  let { file, dirty = $bindable(false), query = '', onclose } = $props()
+  let { file, dirty = $bindable(false), query = '', onclose, onescape } = $props()
   let editor
   // Next (1) or previous (-1) match of the omnibox's text in the file.
   export const find = (dir) => editor?.find(dir)
@@ -33,15 +33,6 @@
   )
   const source = $derived(file.edit ? text : linesToText(file.lines))
 
-  let leaving = $state(false) // Close was clicked once with unsaved changes
-  function close() {
-    if (dirty && !leaving) {
-      leaving = true
-      setTimeout(() => (leaving = false), 3000)
-      return
-    }
-    onclose()
-  }
 </script>
 
 <section class="file">
@@ -50,7 +41,6 @@
     {#if file.lang}<span class="lang">{file.lang}</span>{/if}
     <span class="spacer"></span>
     {#if kind}<RawRender {kind} />{/if}
-    <button class:warn={leaving} onclick={close} title="Close (Esc)">{leaving ? 'Discard changes?' : 'Close'}</button>
   </header>
   {#if kind === 'img'}
     <div class="body">{#if picture}<ImageView info={picture} drawn={view.img} />{/if}</div>
@@ -64,7 +54,7 @@
     {/if}
     <div class="edit" hidden={rendered}>
       {#if file.edit}
-        <Editor bind:this={editor} {file} {query} bind:text bind:dirty />
+        <Editor bind:this={editor} {file} {query} {onescape} bind:text bind:dirty />
       {:else}
         <div class="body"><Lines lines={file.lines} numbers /></div>
       {/if}
@@ -87,9 +77,6 @@
   .path { color: var(--strong); font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lang { color: var(--dim); font-size: 12px; }
   .spacer { flex: 1; }
-  header button { background: none; border: 0; border-radius: 6px; padding: 3px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }
-  header button:hover { color: var(--text); background: var(--raised); }
-  header button.warn { color: var(--c-deleted); }
   .body { flex: 1; min-height: 0; overflow: auto; padding: 10px 4px; }
   .edit { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .edit[hidden] { display: none; }

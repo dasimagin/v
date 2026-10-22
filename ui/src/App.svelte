@@ -46,7 +46,6 @@
     resume: 'Type to find a session · ↑↓ pick · Esc back',
     open: 'Type to find a file · ↑↓ pick · → enter or open · ← up · Tab: ask the agent · Esc back',
     show: 'Type to filter commits · ↑↓ pick · Esc back',
-    file: '/ for commands · Esc closes the file',
   }
   const placeholder = $derived(
     askAbout && (screen === 'open' || screen === 'file')
@@ -432,9 +431,21 @@
     if (info.git.branch === it.query) back()
   }
 
+  // Esc always leaves the file. With changes that are not saved, the first Esc says so and a second one (within
+  // a few seconds) leaves anyway.
+  let discardAt = 0
+  function leaveFile() {
+    if (fileDirty && Date.now() - discardAt > 4000) {
+      discardAt = Date.now()
+      return flash('Unsaved changes: save them, or press Esc again to discard them')
+    }
+    closeFile(true)
+  }
+
   function closeFile(force = false) {
     askAbout = false
-    if (fileDirty && !force) return flash('Unsaved changes: save with ⌘S, or discard them with Close')
+    omni?.setText('')
+    if (fileDirty && !force) return flash('Unsaved changes: save them, or press Esc again to discard them')
     fileDirty = false
     screen = cameFrom
     refresh()
@@ -491,7 +502,7 @@
   }
 
   function back() {
-    if (screen === 'file') return closeFile()
+    if (screen === 'file') return leaveFile()
     screen = messages.length ? 'chat' : 'home'
     query = ''
     omni?.setText('')
@@ -507,7 +518,7 @@
       return false
     }
     if (screen === 'file') {
-      if (e.key === 'Escape' && text === '') { closeFile(); return true }
+      if (e.key === 'Escape') { leaveFile(); return true }
       if (e.key === 'Tab') { askAbout = !askAbout; return true } // search <-> ask the agent
       if (askAbout) return false // Enter sends the question
       // The omnibox searches the file: Enter or the arrows go from match to match.
@@ -634,7 +645,7 @@
   {:else if screen === 'chat'}
     <Chat {messages} {busy} {onanswer} bind:level />
   {:else if screen === 'file' && openedFile}
-    <FileView bind:this={fileview} query={fileQuery} file={openedFile} bind:dirty={fileDirty} onclose={() => closeFile(true)} />
+    <FileView bind:this={fileview} query={fileQuery} file={openedFile} bind:dirty={fileDirty} onclose={() => closeFile(true)} onescape={leaveFile} />
   {:else}
     <section class="hero">
       <Logo animate={!!info?.animate} />

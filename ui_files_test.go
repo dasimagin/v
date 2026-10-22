@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,42 @@ func TestUIDetail(t *testing.T) {
 	files, _ := parsePatch("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n")
 	if len(files) != 1 || files[0].Add != 1 || files[0].Del != 1 || files[0].Rows[2].Old != 2 || files[0].Rows[3].New != 2 {
 		t.Errorf("parsePatch: %+v", files)
+	}
+}
+
+func TestToolDetail(t *testing.T) {
+	if got := toolDetail("Bash", map[string]any{"command": "go test ./..."}); got != "go test ./..." {
+		t.Errorf("Bash: %q", got)
+	}
+	if got := toolDetail("Edit", map[string]any{"old_string": "a", "new_string": "b\nc"}); got != "- a\n+ b\n+ c" {
+		t.Errorf("Edit: %q", got)
+	}
+	if got := toolDetail("Grep", map[string]any{"pattern": "x", "head_limit": 5.0}); got != "head_limit: 5\npattern: x" {
+		t.Errorf("Grep: %q", got)
+	}
+	if got := resultText([]byte(`[{"type":"text","text":"one"},{"type":"text","text":"two"}]`)); got != "one\ntwo" {
+		t.Errorf("resultText: %q", got)
+	}
+	if got := clipText(strings.Repeat("é", 10), 5); !strings.HasPrefix(got, "éé") || !strings.HasSuffix(got, "… cut") {
+		t.Errorf("clipText: %q", got)
+	}
+}
+
+func TestDiffContextOptions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ob, oa := diffBefore, diffAfter
+	t.Cleanup(func() { diffBefore, diffAfter = ob, oa })
+	s := Settings{DiffBefore: 3, DiffAfter: 3}
+	if err := setUIOption(&s, "diff_before", "8"); err != nil {
+		t.Fatal(err)
+	}
+	if err := setUIOption(&s, "diff_after", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if s.DiffBefore != 8 || s.DiffAfter != 1 || diffBefore != 8 || diffAfter != 1 {
+		t.Errorf("settings %d/%d, in use %d/%d", s.DiffBefore, s.DiffAfter, diffBefore, diffAfter)
+	}
+	if err := setUIOption(&s, "diff_before", "7"); err == nil {
+		t.Error("7 is not one of the choices")
 	}
 }

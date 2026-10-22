@@ -10,7 +10,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 
 	webview "github.com/webview/webview_go"
 )
@@ -28,6 +30,7 @@ func runUI(args []string) {
 		fmt.Fprintln(os.Stderr, "v:", err)
 		os.Exit(2)
 	}
+	applyDiffSettings(loadedSettings()) // the diff context of the settings, until they are changed here
 	if err := openWindow(dir); err != nil {
 		fmt.Fprintln(os.Stderr, "v:", err)
 		os.Exit(1)
@@ -55,6 +58,12 @@ func openWindow(startDir string) error {
 		w.Dispatch(func() { w.Eval("window.vEvent&&window.vEvent(" + string(b) + ")") })
 	})
 	defer chat.Reset()
+	emit := func(e uiEvent) {
+		b, _ := json.Marshal(e)
+		w.Dispatch(func() { w.Eval("window.vEvent&&window.vEvent(" + string(b) + ")") })
+	}
+	shell := newUIShell(emit)
+	defer shell.StopAll()
 	w.SetTitle("Vibing")
 	w.SetSize(1100, 720, webview.HintNone)
 	// Bound functions appear as window.vStart() and window.vTagline().
@@ -111,7 +120,19 @@ func openWindow(startDir string) error {
 	}); err != nil {
 		return err
 	}
-	if err := w.Bind("vSend", func(text string) error { return chat.Send(wd.get(), text) }); err != nil {
+	// vSend's second argument is what the shell mode did since the last message.
+	if err := w.Bind("vSend", func(text, context string) error {
+		if context != "" {
+			text = context + "\n\n" + text
+		}
+		return chat.Send(wd.get(), text)
+	}); err != nil {
+		return err
+	}
+	if err := w.Bind("vShell", func(id, command string, cols int) error { return shell.Run(wd.get(), id, command, cols) }); err != nil {
+		return err
+	}
+	if err := w.Bind("vShellStop", shell.Stop); err != nil {
 		return err
 	}
 	if err := w.Bind("vAnswer", chat.Answer); err != nil {
@@ -128,6 +149,37 @@ func openWindow(startDir string) error {
 	}
 	prs := &uiPRs{}
 	if err := w.Bind("vPR", func(arg string) (uiPRHead, error) { return prs.Load(wd.get(), arg) }); err != nil {
+		return err
+	}
+	// The actions on the open PR; each returns the PR's new head.
+	for name, fn := range map[string]any{
+		"vPRReply": func(thread, body string) (uiPRHead, error) { return prs.Reply(wd.get(), thread, body) },
+		"vPRComment": func(path string, start, line int, body string) (uiPRHead, error) {
+			return prs.Comment(wd.get(), path, start, line, body)
+		},
+		"vPREdit":    func(title, body string) (uiPRHead, error) { return prs.Edit(wd.get(), title, body) },
+		"vPRTalk":    func(body string, summary bool) (uiPRHead, error) { return prs.Talk(wd.get(), body, summary) },
+		"vPRResolve": func(thread string, resolved bool) (uiPRHead, error) { return prs.Resolve(wd.get(), thread, resolved) },
+		"vPRDelete":  func(id string, conversation bool) (uiPRHead, error) { return prs.Delete(wd.get(), id, conversation) },
+		"vPRSubmit":  func(verdict int, summary string) (uiPRHead, error) { return prs.Submit(wd.get(), verdict, summary) },
+	} {
+		if err := w.Bind(name, fn); err != nil {
+			return err
+		}
+	}
+	if err := w.Bind("vPRChecks", func() ([]uiCheck, error) { return prs.Checks(wd.get()) }); err != nil {
+		return err
+	}
+	// vOpenURL opens a web page (a check's log, say) in the browser.
+	if err := w.Bind("vOpenURL", func(link string) error {
+		if u, err := url.Parse(link); err != nil || u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("not a web link: %s", link)
+		}
+		return exec.Command("open", link).Start()
+	}); err != nil {
+		return err
+	}
+	if err := w.Bind("vBranchPRs", func() []uiPRRef { return uiBranchPRs(wd.get()) }); err != nil {
 		return err
 	}
 	if err := w.Bind("vPRView", prs.View); err != nil {

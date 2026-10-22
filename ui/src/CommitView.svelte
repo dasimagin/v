@@ -12,6 +12,23 @@
   const dir = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '')
   const base = (p) => p.slice(p.lastIndexOf('/') + 1)
   let open = $state({})
+
+  // A click on the hash puts the full hash on the clipboard.
+  let copied = $state(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(d.hash)
+    } catch {
+      const t = document.createElement('textarea') // where the clipboard API is not available
+      t.value = d.hash
+      document.body.appendChild(t)
+      t.select()
+      document.execCommand('copy')
+      t.remove()
+    }
+    copied = true
+    setTimeout(() => (copied = false), 1400)
+  }
 </script>
 
 {#if d.err}
@@ -24,7 +41,7 @@
         <div class="name">{d.author}</div>
         <div class="when">{d.rel} · {d.date}</div>
       </div>
-      <code class="hash" title={d.hash}>{d.short}</code>
+      <button class="hash" class:ok={copied} title={copied ? 'Copied' : `Copy ${d.hash}`} onclick={copy}>{copied ? 'copied' : d.short}</button>
     </header>
 
     {#if d.refs?.length}
@@ -71,6 +88,9 @@
   .who { flex: 1; min-width: 0; }
   .name { color: var(--strong); font-weight: 600; }
   .when { color: var(--dim); font-size: 12px; }
+  .hash { border: 0; cursor: pointer; }
+  .hash:hover { filter: brightness(1.25); }
+  .hash.ok { color: var(--c-added, #98e379); }
   .hash { background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 6px; font: 12px var(--mono); }
   .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .ref { padding: 0 8px; border-radius: 999px; font: 11.5px/1.6 var(--mono); border: 1px solid var(--line); color: var(--dim); }

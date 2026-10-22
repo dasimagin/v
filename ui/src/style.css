@@ -80,3 +80,7 @@ button { font: inherit; color: inherit; }
 .t-deleted { color: var(--c-deleted); }
 
 code, pre, .code, .t { font-variant-ligatures: contextual common-ligatures; font-feature-settings: 'calt' 1, 'liga' 1; }
+
+/* Everything still scrolls (wheel, trackpad, keys); the bars are not drawn anywhere. */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }

@@ -6,6 +6,7 @@
   import Config from './Config.svelte'
   import Picker from './Picker.svelte'
   import { kindOf, toggleRender } from './prefs.svelte.js'
+  import { completion } from './complete.js'
   import FileView from './FileView.svelte'
   import Chat from './Chat.svelte'
   import PRView from './PRView.svelte'
@@ -47,10 +48,10 @@
     pr: 'Filter files or threads · ↑↓ pick · ←→ main / files / threads / CI · Esc back',
     chat: 'Message the agent, or type / for commands · Esc stops a running turn',
     config: 'Search settings · ↑↓ pick · ←→ change · / for commands',
-    workdir: 'Type to find a folder · ↑↓ pick · → enter · ← up · Enter choose · Esc back',
+    workdir: 'Type to find a folder · ↑↓ pick · Tab complete · → enter · ← up · Enter choose · Esc back',
     switch: 'Type to find a branch · ↑↓ pick · Enter switch · Esc back',
     resume: 'Type to find a session · ↑↓ pick · Esc back',
-    open: 'Type to find a file · ↑↓ pick · → enter or open · ← up · Esc back',
+    open: 'Type to find a file · ↑↓ pick · Tab complete · → enter or open · ← up · Esc back',
     show: 'Type to filter commits · ↑↓ pick · Esc back',
   }
   const placeholder = $derived(placeholders[screen] ?? 'Ask the agent, or type / for commands')
@@ -538,6 +539,12 @@
   // /open and /show: the omnibox filters, arrows pick, → enters or opens, ← goes up.
   function onpickkey(e, text) {
     const n = pick?.items.length ?? 0
+    if (e.key === 'Tab' && (screen === 'open' || screen === 'workdir')) {
+      // Complete the path to what the list agrees on, or to the highlighted row.
+      const next = completion(text, pick?.items ?? [], sel)
+      if (next !== null) omni?.setText(next)
+      return true
+    }
 
     const open = screen === 'open' || screen === 'workdir'
     switch (e.key) {

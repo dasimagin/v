@@ -29,7 +29,7 @@
         {:else if kind === 'log'}
           {#if it.graph}<Graph row={it.graph} lanes={pick.lanes} />{/if}
           <span class="logtext">
-            <span class="logtop"><span class="label">{it.label}</span>{#each it.refs ?? [] as r}<span class="ref {r.kind}">{#if r.kind === 'tag'}<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M1.5 2.5h6l6 6-5 5-6-6v-5Zm2.2 1.2a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>{/if}{r.name}</span>{/each}</span>
+            <span class="logtop"><span class="label">{it.label}</span>{#each (it.refs ?? []).slice(0, 3) as r}<span class="ref {r.kind}">{#if r.kind === 'tag'}<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M1.5 2.5h6l6 6-5 5-6-6v-5Zm2.2 1.2a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>{/if}{r.name}</span>{/each}{#if (it.refs ?? []).length > 3}<span class="ref more">+{it.refs.length - 3}</span>{/if}</span>
             {#if it.meta}<span class="meta"><code>{it.meta.split(' · ')[0]}</code> {it.meta.split(' · ').slice(1).join(' · ')}</span>{/if}
           </span>
         {:else}

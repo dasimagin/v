@@ -178,7 +178,7 @@ func uiPickList(workdir, kind, query string) uiPick {
 	return pick
 }
 
-// uiLogList lists the commits of all branches; while nothing is typed, each carries its row of the graph.
+// uiLogList lists the commits of the current branch; while nothing is typed, each carries its row of the graph.
 func uiLogList(workdir, query string) uiPick {
 	pick := uiPick{Items: []uiItem{}}
 	commits, err := loadLog(workdir)

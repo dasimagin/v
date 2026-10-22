@@ -38,3 +38,54 @@ func TestBuildGraph(t *testing.T) {
 		t.Errorf("text of the merge = %q", got)
 	}
 }
+
+func TestLoadLogStaysOnTheBranch(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if _, err := gitOutput(dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base")
+	git("switch", "-q", "-c", "side")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "on side")
+	git("switch", "-q", "main")
+	git("tag", "v1")
+	mine, err := loadLog(dir)
+	if err != nil || len(mine) != 1 || mine[0].Subject != "base" {
+		t.Fatalf("this branch: %v %v", mine, err)
+	}
+	if want := []logRef{{"main", "head"}, {"v1", "tag"}}; !slices.Equal(mine[0].Refs, want) {
+		t.Errorf("refs = %v, want %v", mine[0].Refs, want)
+	}
+}
+
+func TestRefsTextFoldsTheRest(t *testing.T) {
+	refs := []logRef{{"a", "branch"}, {"b", "branch"}, {"c", "branch"}, {"d", "branch"}, {"e", "tag"}}
+	if got := refsText(refs); got != "(a, b, c, +2) " {
+		t.Errorf("refsText = %q", got)
+	}
+}
+
+func TestLoadLogIsCached(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if _, err := gitOutput(dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+	a, _ := loadLog(dir)
+	b, _ := loadLog(dir)
+	if len(a) != 1 || len(b) != 1 || &a[0] != &b[0] {
+		t.Error("the second call should hand back the first one's commits")
+	}
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+	if c, _ := loadLog(dir); len(c) != 2 {
+		t.Errorf("a new commit must show: %d commits", len(c))
+	}
+}

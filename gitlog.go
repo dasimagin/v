@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
 
 // logRef is a branch or a tag that points at a commit.
@@ -20,12 +22,39 @@ type logCommit struct {
 
 const logMax = 300
 
-// loadLog reads the history of all branches, newest first, with the branches and
-// tags on the commits and the parents that the graph needs.
+// loadLog reads the history of the current branch, newest first. Every commit carries the tags
+// and the other branches that point at it, and the parents that the graph needs; only what the
+// current branch reaches is listed, so a repository with many branches stays small.
 func loadLog(dir string) ([]logCommit, error) {
+	head, _ := gitOutput(dir, "rev-parse", "HEAD")
+	logCache.Lock()
+	defer logCache.Unlock()
+	if head != "" && logCache.dir == dir && logCache.head == head && time.Since(logCache.at) < 20*time.Second {
+		return logCache.commits, nil
+	}
+	cs, err := readLog(dir)
+	if err == nil {
+		logCache.dir, logCache.head, logCache.at, logCache.commits = dir, head, time.Now(), cs
+	}
+	return cs, err
+}
+
+// logCache keeps the last log for a few seconds: the list asks for it on every key typed,
+// and the answer only changes when HEAD moves.
+var logCache struct {
+	sync.Mutex
+	dir, head string
+	at        time.Time
+	commits   []logCommit
+}
+
+func readLog(dir string) ([]logCommit, error) {
 	const sep = "\x1f"
-	out, err := gitOutput(dir, "log", "--all", "--topo-order", "-n", fmt.Sprint(logMax), "--decorate=short",
-		"--format=%H"+sep+"%h"+sep+"%cr"+sep+"%an"+sep+"%P"+sep+"%D"+sep+"%s")
+	// The default order, not --topo-order: git stops after logMax commits instead of walking the
+	// whole history to sort it, which is what makes a huge repository slow.
+	args := []string{"log", "-n", fmt.Sprint(logMax), "--decorate=short",
+		"--format=%H" + sep + "%h" + sep + "%cr" + sep + "%an" + sep + "%P" + sep + "%D" + sep + "%s"}
+	out, err := gitOutput(dir, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -188,13 +217,19 @@ func (g graphRow) text(width int) string {
 	return strings.TrimRight(string(cells), " ")
 }
 
+const logRefsShown = 3 // more refs than this on a commit are folded into "+N"
+
 // refsText is "(main, tag: v1)" for the terminal; empty if there are no refs.
 func refsText(refs []logRef) string {
 	if len(refs) == 0 {
 		return ""
 	}
 	var names []string
-	for _, r := range refs {
+	for i, r := range refs {
+		if i == logRefsShown {
+			names = append(names, fmt.Sprintf("+%d", len(refs)-logRefsShown))
+			break
+		}
 		switch r.Kind {
 		case "tag":
 			names = append(names, "tag: "+r.Name)

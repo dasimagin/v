@@ -16,7 +16,7 @@ It is a young project. Expect rough edges and changes in behavior.
 
 - **Chat with the agent.** Type to talk to [Claude Code](https://claude.com/claude-code); `/resume` picks up past sessions, model and effort are dropdowns in the bottom line.
 - **Files and diffs in the same window.** Browse and fuzzy-search files with `/open`, edit them in place, and see changes against `HEAD` as flat, unified or side-by-side diffs.
-- **Workdir and Git.** Switch the working directory (`/workdir`) and branches (`/switch`), read the history of all branches with their tags (`/log`, also `/show`); every picker has a preview.
+- **Workdir and Git.** Switch the working directory (`/workdir`) and branches (`/switch`), read the history of this branch with its tags and a graph (`/log`, also `/show`); every picker has a preview.
 - **A PR screen.** `/pr <url>` checks out a pull request and shows it as a diff with its review threads: reply, resolve, comment on lines and ranges, keep everything in a pending review and submit it with a verdict.
 - **Review agents (experimental).** `/review make` has an agent review the PR and post comments; `/apply` has an agent fix the open threads, commit, push and reply; `/converge` runs the two in turns until the reviewer has nothing blocking left. The agents work with GitHub only through tools `v` provides; their instructions are Markdown files in [`prompts/`](prompts/README.md) that you can override.
 - **Themes and a tidy UI.** Dark themes, mouse support, a searchable `/config`, help on `?`.

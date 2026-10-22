@@ -30,7 +30,7 @@
     padding: 4px 0 14px;
   }
   header { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 4px 10px; border-bottom: 1px solid var(--divider); }
-  .path { color: var(--strong); font: 12.5px ui-monospace, 'SF Mono', Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .path { color: var(--strong); font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lang { color: var(--dim); font-size: 12px; }
   .spacer { flex: 1; }
   button { background: none; border: 0; border-radius: 6px; padding: 3px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }

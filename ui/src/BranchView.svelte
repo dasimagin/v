@@ -61,7 +61,7 @@
   .h { margin: 18px 0 8px; padding-top: 12px; border-top: 1px solid var(--divider); color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 
   .files { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); max-height: 220px; overflow: auto; }
-  .files li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px; font: 12.5px ui-monospace, 'SF Mono', Menlo, monospace; }
+  .files li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px; font: 12.5px var(--mono); }
   .files li + li { border-top: 1px solid var(--line); }
   .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--strong); }
   .dirp { color: var(--dim); }
@@ -74,5 +74,5 @@
   .tl li:first-child .dot { background: var(--accent); }
   .subj { color: var(--strong); line-height: 1.35; }
   .meta { color: var(--dim); font-size: 12px; margin-top: 2px; }
-  .meta code { color: var(--accent); font: 12px ui-monospace, 'SF Mono', Menlo, monospace; }
+  .meta code { color: var(--accent); font: 12px var(--mono); }
 </style>

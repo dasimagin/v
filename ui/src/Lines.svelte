@@ -14,7 +14,7 @@
 </div>
 
 <style>
-  .code { font: 12.5px/1.55 ui-monospace, 'SF Mono', Menlo, monospace; color: var(--strong); user-select: text; }
+  .code { font: 12.5px/1.55 var(--mono); color: var(--strong); user-select: text; }
   .line { display: flex; white-space: pre; }
   .no { flex: none; width: 4.5ch; margin-right: 16px; text-align: right; color: var(--dim); opacity: 0.7; user-select: none; }
   .text { tab-size: 4; }

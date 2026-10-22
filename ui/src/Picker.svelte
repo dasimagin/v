@@ -62,7 +62,7 @@
   .list, .pane { min-height: 0; overflow: auto; }
   .pane { border-left: 1px solid var(--divider); padding: 0 0 0 16px; }
 
-  .dir { padding: 2px 10px 8px; color: var(--dim); font: 12px ui-monospace, 'SF Mono', Menlo, monospace; }
+  .dir { padding: 2px 10px 8px; color: var(--dim); font: 12px var(--mono); }
   .msg { padding: 8px 10px; color: var(--dim); }
   .row {
     width: 100%;
@@ -85,6 +85,6 @@
   .on .bi { color: var(--accent); }
   .badge { flex: none; margin-left: auto; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 11px; }
   .badge.cur { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
-  .meta code { color: var(--accent); font: 11.5px ui-monospace, 'SF Mono', Menlo, monospace; }
+  .meta code { color: var(--accent); font: 11.5px var(--mono); }
   .meta { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

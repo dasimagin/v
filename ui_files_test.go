@@ -222,3 +222,23 @@ func TestUISaveFile(t *testing.T) {
 		t.Errorf("no temp files are left: %v", entries)
 	}
 }
+
+func TestUIOpenSuggestsFromBelow(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "ui", "src"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "node_modules", "x"), 0o755)
+	os.WriteFile(filepath.Join(dir, "main.go"), nil, 0o644)
+	os.WriteFile(filepath.Join(dir, "ui", "src", "Picker.svelte"), nil, 0o644)
+	os.WriteFile(filepath.Join(dir, "node_modules", "x", "picker.js"), nil, 0o644)
+	projectFiles.dir = "" // forget what an earlier test saw
+	p := uiPickList(dir, "open", "pick")
+	if len(p.Items) != 1 || p.Items[0].Label != "Picker.svelte" || p.Items[0].Meta != "ui/src/" {
+		t.Fatalf("suggestions: %+v", p.Items)
+	}
+	if p.Items[0].Value != filepath.Join(dir, "ui", "src", "Picker.svelte") {
+		t.Errorf("it opens by its real path: %q", p.Items[0].Value)
+	}
+	if p := uiPickList(dir, "open", ""); len(p.Items) != 3 {
+		t.Errorf("without a query only this folder is listed: %+v", p.Items)
+	}
+}

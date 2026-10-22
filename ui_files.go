@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
@@ -190,6 +193,29 @@ func uiPickList(workdir, kind, query string) uiPick {
 			it.Query = queryFor(workdir, path)
 		}
 		found = append(found, scored{it, score})
+	}
+	// Something is typed: suggest matches from the folders below too, not only the ones in this folder.
+	if kind == "open" && strings.TrimSpace(needle) != "" {
+		have := map[string]bool{}
+		for _, x := range found {
+			have[x.Value] = true
+		}
+		for _, rel := range uiProjectFiles(dir) {
+			if !strings.Contains(rel, "/") {
+				continue // the files of this folder are listed above
+			}
+			path := filepath.Join(dir, rel)
+			if have[path] {
+				continue
+			}
+			if score, ok := fuzzyScore(needle, rel); ok {
+				// The file name is the label; the folders it is in come under it.
+				found = append(found, scored{uiItem{Value: path, Label: filepath.Base(rel), Meta: filepath.Dir(rel) + "/"}, score - 1})
+			}
+			if len(found) > 20000 {
+				break
+			}
+		}
 	}
 	sort.SliceStable(found, func(i, j int) bool {
 		if found[i].score != found[j].score {
@@ -473,4 +499,52 @@ func uiHighlight(path, text string) uiLines {
 		return uiLines{}
 	}
 	return uiLinesOf(lines)
+}
+
+// uiProjectFiles lists the files below dir, as paths relative to it: the ones Git knows (and the untracked
+// ones it does not ignore) in a repository, else a walk that skips hidden folders and the usual heaps.
+// The answer is kept for a few seconds, as it is asked for on every key typed.
+func uiProjectFiles(dir string) []string {
+	projectFiles.Lock()
+	defer projectFiles.Unlock()
+	if projectFiles.dir == dir && time.Since(projectFiles.at) < 20*time.Second {
+		return projectFiles.files
+	}
+	var files []string
+	if out, err := gitOutput(dir, "ls-files", "--cached", "--others", "--exclude-standard"); err == nil && out != "" {
+		for _, l := range strings.Split(out, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				files = append(files, l)
+			}
+		}
+	} else {
+		skip := map[string]bool{"node_modules": true, "vendor": true, "target": true, "dist": true, "build": true, "__pycache__": true}
+		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := d.Name()
+			if d.IsDir() && p != dir && (strings.HasPrefix(name, ".") || skip[name]) {
+				return filepath.SkipDir
+			}
+			if !d.IsDir() {
+				if rel, err := filepath.Rel(dir, p); err == nil {
+					files = append(files, filepath.ToSlash(rel))
+				}
+			}
+			if len(files) >= 50000 {
+				return filepath.SkipAll
+			}
+			return nil
+		})
+	}
+	projectFiles.dir, projectFiles.at, projectFiles.files = dir, time.Now(), files
+	return files
+}
+
+var projectFiles struct {
+	sync.Mutex
+	dir   string
+	at    time.Time
+	files []string
 }

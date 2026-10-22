@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -57,12 +58,13 @@ func uiCommitOf(dir, hash string) uiCommitDetail {
 		return d
 	}
 	d.Hash, d.Short, d.Author, d.Email, d.Date, d.Rel, d.Subject, d.Body = f[0], f[1], f[2], f[3], f[4], f[5], f[6], strings.TrimSpace(f[7])
-	patch, err := gitOutput(dir, "show", "--format=", "--no-color", "-U3", hash, "--")
+	patch, err := gitOutput(dir, "show", "--format=", "--no-color", fmt.Sprintf("-U%d", max(diffBefore, diffAfter)), hash, "--")
 	if err != nil {
 		d.Err = err.Error()
 		return d
 	}
-	d.Files, d.MoreFiles = parsePatch(patch)
+	// Git gives as much context as the larger of the two settings; each side is then trimmed to its own.
+	d.Files, d.MoreFiles = parsePatch(strings.Join(reflowPatch(strings.Split(patch, "\n"), diffBefore, diffAfter, nil), "\n"))
 	return d
 }
 

@@ -71,17 +71,15 @@ func uiLinesOf(lines [][]seg) uiLines {
 
 // uiItem is a row of a list: a file or folder for /open, a commit for /log.
 type uiItem struct {
-	Value string `json:"value"` // path or hash
-	Label string `json:"label"`
-	Meta  string `json:"meta"`
-	Dir   bool   `json:"dir"`
-	Query string `json:"query"` // /open: what to type to go into the folder
-	Tag   string `json:"tag"`   // /switch: "current", "local" or "remote"
-	Sub   string `json:"sub"`   // /switch: the branch's latest commit
-	When  string `json:"when"`  // /switch: how long ago
-	// /log: the branches and tags on the commit, and where it sits in the graph.
-	Refs  []logRef  `json:"refs,omitempty"`
-	Graph *graphRow `json:"graph,omitempty"`
+	Value string   `json:"value"` // path or hash
+	Label string   `json:"label"`
+	Meta  string   `json:"meta"`
+	Dir   bool     `json:"dir"`
+	Query string   `json:"query"`          // /open: what to type to go into the folder
+	Tag   string   `json:"tag"`            // /switch: "current", "local" or "remote"
+	Sub   string   `json:"sub"`            // /switch: the branch's latest commit
+	When  string   `json:"when"`           // /switch: how long ago
+	Refs  []logRef `json:"refs,omitempty"` // /log: the tags and the other branches on the commit
 }
 
 type uiPick struct {
@@ -89,7 +87,6 @@ type uiPick struct {
 	Up    string   `json:"up"`  // /open: what to type to go to its parent
 	Items []uiItem `json:"items"`
 	Err   string   `json:"err"`
-	Lanes int      `json:"lanes,omitempty"` // /log: how many lanes the widest row of the graph has
 }
 
 const uiPickMax = 300
@@ -178,7 +175,7 @@ func uiPickList(workdir, kind, query string) uiPick {
 	return pick
 }
 
-// uiLogList lists the commits of the current branch; while nothing is typed, each carries its row of the graph.
+// uiLogList lists the commits of the current branch with the tags and other branches on them.
 func uiLogList(workdir, query string) uiPick {
 	pick := uiPick{Items: []uiItem{}}
 	commits, err := loadLog(workdir)
@@ -186,22 +183,15 @@ func uiLogList(workdir, query string) uiPick {
 		pick.Err = "No history here · " + err.Error()
 		return pick
 	}
-	graph := buildGraph(commits)
-	showGraph := strings.TrimSpace(query) == ""
 	type scored struct {
 		uiItem
 		score int
 	}
 	var found []scored
-	for i, c := range commits {
+	for _, c := range commits {
 		score, ok := fuzzyScore(query, c.Short+" "+c.Subject+" "+c.Author)
 		if ok {
 			it := uiItem{Value: c.Hash, Label: c.Subject, Meta: c.Short + " · " + c.Author + " · " + c.When, Refs: c.Refs}
-			if showGraph {
-				row := graph[i]
-				it.Graph = &row
-				pick.Lanes = max(pick.Lanes, min(row.Lanes, graphMaxLanes))
-			}
 			found = append(found, scored{it, score})
 		}
 	}

@@ -2,7 +2,6 @@
   import Lines from './Lines.svelte'
   import CommitView from './CommitView.svelte'
   import BranchView from './BranchView.svelte'
-  import Graph from './Graph.svelte'
 
   // A list on the left and a preview of the selected row on the right.
   let { kind, pick, sel, preview, empty, onselect, onchoose } = $props()
@@ -18,7 +17,7 @@
     {#if pick?.dir}<div class="dir">{pick.dir}</div>{/if}
     {#if pick?.err}<div class="msg">{pick.err}</div>{/if}
     {#each pick?.items ?? [] as it, i (it.value)}
-      <button class="row" class:on={i === sel} class:isdir={it.dir} class:logrow={kind === 'log' && it.graph} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
+      <button class="row" class:on={i === sel} class:isdir={it.dir} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
         {#if kind === 'switch'}
           <span class="top">
             <svg class="bi" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M5 3.25a1.75 1.75 0 1 1-2.5 1.58v6.34a1.75 1.75 0 1 1 1.5 0V8.5c0-.97.78-1.75 1.75-1.75h3.5a.25.25 0 0 0 .25-.25V4.83a1.75 1.75 0 1 1 1.5 0V6.5A1.75 1.75 0 0 1 9.5 8.25H6a.25.25 0 0 0-.25.25v.67A1.75 1.75 0 0 1 5 3.25Z"/></svg>
@@ -27,7 +26,6 @@
           </span>
           {#if it.sub}<span class="meta">{it.sub}{it.when ? ' · ' + it.when : ''}</span>{/if}
         {:else if kind === 'log'}
-          {#if it.graph}<Graph row={it.graph} lanes={pick.lanes} />{/if}
           <span class="logtext">
             <span class="logtop"><span class="label">{it.label}</span>{#each (it.refs ?? []).slice(0, 3) as r}<span class="ref {r.kind}">{#if r.kind === 'tag'}<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M1.5 2.5h6l6 6-5 5-6-6v-5Zm2.2 1.2a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>{/if}{r.name}</span>{/each}{#if (it.refs ?? []).length > 3}<span class="ref more">+{it.refs.length - 3}</span>{/if}</span>
             {#if it.meta}<span class="meta"><code>{it.meta.split(' · ')[0]}</code> {it.meta.split(' · ').slice(1).join(' · ')}</span>{/if}
@@ -89,10 +87,9 @@
   .on .bi { color: var(--accent); }
   .badge { flex: none; margin-left: auto; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 11px; }
   .badge.cur { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
-  .row.logrow { flex-direction: row; align-items: center; gap: 0; padding: 0 10px 0 4px; height: 50px; }
   .logtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .logtop { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .logtop .label { flex: 0 1 auto; min-width: 45%; }
+  .logtop .label { flex: 0 1 auto; min-width: 0; }
   .ref { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 999px; font: 11px/1.5 var(--mono); border: 1px solid var(--line); color: var(--dim); }
   .ref.head { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
   .ref.branch { color: var(--c-added, #98e379); border-color: color-mix(in srgb, var(--c-added, #98e379) 40%, transparent); }

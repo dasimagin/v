@@ -60,13 +60,12 @@ export const list = (kind, query) =>
         dir: '~/sandbox/v',
         up: '',
         err: '',
-        lanes: kind === 'log' ? 2 : 0,
         items: kind === 'log'
           ? [
-              { value: 'a1', label: 'Merge the graphical UI', meta: '9d3e2f1 · Denis · 1 hour ago', refs: [{ name: 'master', kind: 'head' }, { name: 'origin/master', kind: 'remote' }, { name: 'v0.3', kind: 'tag' }], graph: { node: 0, lanes: 2, pass: [], in: [], out: [0, 1] } },
-              { value: 'a2', label: 'Move start-screen jokes to taglines.txt', meta: '07596a8 · Denis · 2 hours ago', refs: [], graph: { node: 0, lanes: 2, pass: [1], in: [], out: [0] } },
-              { value: 'a3', label: 'Add the PR screen', meta: '3c1d9aa · Denis · 3 hours ago', refs: [{ name: 'ui-experiment', kind: 'branch' }], graph: { node: 1, lanes: 2, pass: [0], in: [], out: [1] } },
-              { value: 'a4', label: 'Start the graphical UI', meta: '1569d5e · Denis · yesterday', refs: [{ name: 'v0.2', kind: 'tag' }], graph: { node: 0, lanes: 2, pass: [], in: [0, 1], out: [0] } },
+              { value: 'a1', label: 'Merge the graphical UI', meta: '9d3e2f1 · Denis · 1 hour ago', refs: [{ name: 'master', kind: 'head' }, { name: 'origin/master', kind: 'remote' }, { name: 'v0.3', kind: 'tag' }]},
+              { value: 'a2', label: 'Move start-screen jokes to taglines.txt', meta: '07596a8 · Denis · 2 hours ago', refs: []},
+              { value: 'a3', label: 'Add the PR screen', meta: '3c1d9aa · Denis · 3 hours ago', refs: [{ name: 'ui-experiment', kind: 'branch' }]},
+              { value: 'a4', label: 'Start the graphical UI', meta: '1569d5e · Denis · yesterday', refs: [{ name: 'v0.2', kind: 'tag' }]},
             ]
           : kind === 'switch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]

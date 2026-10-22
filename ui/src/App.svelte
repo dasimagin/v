@@ -5,6 +5,7 @@
   import Omnibox from './Omnibox.svelte'
   import Config from './Config.svelte'
   import Picker from './Picker.svelte'
+  import { kindOf, toggleRender } from './prefs.svelte.js'
   import FileView from './FileView.svelte'
   import Chat from './Chat.svelte'
   import PRView from './PRView.svelte'
@@ -60,6 +61,9 @@
         await startPR('')
         setTimeout(() => prview?.key({ key: 'ArrowRight' }, ''), 100)
         for (let i = 0; i < 4; i++) setTimeout(() => prview?.key({ key: 'ArrowDown' }, ''), 200 + i * 50)
+      } else if (['openmd', 'opensvg', 'openpng'].includes(name)) {
+        onrun('open', '')
+        setTimeout(() => select({ openmd: 1, opensvg: 2, openpng: 3 }[name]), 300)
       } else if (name === 'prci') {
         await startPR('')
         setTimeout(() => prview?.showTab('ci'), 150)
@@ -469,6 +473,7 @@
     }
     if (screen === 'file') {
       if (e.key === 'Escape' && text === '') { closeFile(); return true }
+      if (e.key === 'Tab' && openedFile && toggleRender(openedFile.path)) return true // raw <-> render
       return false
     }
     if (screen === 'pr') return onprkey(e, text)
@@ -495,6 +500,11 @@
   // /open and /show: the omnibox filters, arrows pick, → enters or opens, ← goes up.
   function onpickkey(e, text) {
     const n = pick?.items.length ?? 0
+    if (e.key === 'Tab' && screen === 'open') {
+      // The selected file, shown raw or rendered (Markdown, SVG, a picture).
+      const it = pick?.items[sel]
+      return !!it && !it.dir && toggleRender(it.value)
+    }
     const open = screen === 'open' || screen === 'workdir'
     switch (e.key) {
       case 'ArrowDown': select(Math.min(sel + 1, n - 1)); return true
@@ -561,7 +571,7 @@
   {#if screen === 'config'}
     <Config {options} {query} {sel} {onset} onback={back} onselect={(i) => (sel = i)} />
   {:else if picking}
-    <Picker kind={screen} {pick} {sel} preview={previewLines} empty={screen === 'log' ? 'No commits match' : 'Nothing matches'} onselect={select} onchoose={choose} />
+    <Picker kind={screen} onjump={(q) => omni?.setText(q)} {pick} {sel} preview={previewLines} empty={screen === 'log' ? 'No commits match' : 'Nothing matches'} onselect={select} onchoose={choose} />
   {:else if screen === 'pr'}
     {#if pr}
       <PRView bind:this={prview} bind:pr {query} />

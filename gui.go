@@ -110,6 +110,9 @@ func openWindow(startDir string) error {
 	}); err != nil {
 		return err
 	}
+	if err := w.Bind("vImage", uiImageOf); err != nil {
+		return err
+	}
 	if err := w.Bind("vFile", uiReadFile); err != nil {
 		return err
 	}

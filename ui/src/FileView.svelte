@@ -1,7 +1,25 @@
 <script>
   import Lines from './Lines.svelte'
+  import Markdown from './Markdown.svelte'
+  import ImageView from './ImageView.svelte'
+  import RawRender from './RawRender.svelte'
+  import { linesToText } from './markdown.js'
+  import { view, kindOf } from './prefs.svelte.js'
+  import { imageInfo } from './api.js'
 
   let { file, onclose } = $props()
+
+  // Markdown can be drawn, an SVG too, a picture is drawn or described.
+  const kind = $derived(kindOf(file.path))
+  let picture = $state(null)
+  let seq = 0
+  $effect(() => {
+    const path = file.path
+    picture = null
+    if (kind !== 'img' && kind !== 'svg') return
+    const my = ++seq
+    imageInfo(path).then((i) => my === seq && (picture = i))
+  })
 </script>
 
 <section class="file">
@@ -9,10 +27,17 @@
     <span class="path">{file.path}</span>
     {#if file.lang}<span class="lang">{file.lang}</span>{/if}
     <span class="spacer"></span>
+    {#if kind}<RawRender {kind} />{/if}
     <button onclick={onclose} title="Close (Esc)">Close</button>
   </header>
-  {#if file.err}
+  {#if kind === 'img'}
+    <div class="body">{#if picture}<ImageView info={picture} drawn={view.img} />{/if}</div>
+  {:else if kind === 'svg' && view.svg && picture}
+    <div class="body"><ImageView info={picture} drawn /></div>
+  {:else if file.err}
     <div class="err">{file.err}</div>
+  {:else if kind === 'md' && view.md}
+    <div class="body"><Markdown text={linesToText(file.lines)} /></div>
   {:else}
     <div class="body"><Lines lines={file.lines} numbers /></div>
   {/if}

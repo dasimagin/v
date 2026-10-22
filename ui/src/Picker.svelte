@@ -2,19 +2,55 @@
   import Lines from './Lines.svelte'
   import CommitView from './CommitView.svelte'
   import BranchView from './BranchView.svelte'
+  import Markdown from './Markdown.svelte'
+  import ImageView from './ImageView.svelte'
+  import RawRender from './RawRender.svelte'
+  import { linesToText } from './markdown.js'
+  import { view, kindOf } from './prefs.svelte.js'
+  import { imageInfo } from './api.js'
 
   // A list on the left and a preview of the selected row on the right.
-  let { kind, pick, sel, preview, empty, onselect, onchoose } = $props()
+  let { kind, pick, sel, preview, empty, onselect, onchoose, onjump } = $props()
 
   let list
   $effect(() => {
     list?.querySelector('.on')?.scrollIntoView({ block: 'nearest' })
   })
+
+  // The selected file, when it can be shown in two ways.
+  const chosen = $derived(kind === 'open' ? pick?.items?.[sel] : null)
+  const fileKind = $derived(chosen && !chosen.dir ? kindOf(chosen.value) : '')
+  let picture = $state(null) // the properties and data of the selected picture or SVG
+  let pictureSeq = 0
+  $effect(() => {
+    const path = chosen?.value
+    const k = fileKind
+    picture = null
+    if (!path || (k !== 'img' && k !== 'svg')) return
+    const my = ++pictureSeq
+    imageInfo(path).then((i) => my === pictureSeq && (picture = i))
+  })
 </script>
 
 <section class="picker">
+  {#if pick?.crumbs?.length}
+    <div class="bar">
+      <nav class="crumbs" aria-label="Folders">
+        {#each pick.crumbs as c, i (i)}
+          {#if i > 0}<span class="sep">›</span>{/if}
+          {#if i === pick.crumbs.length - 1}
+            <span class="here">{c.name}</span>
+          {:else}
+            <button class="crumb" onclick={() => onjump(c.query)} onmousedown={(e) => e.preventDefault()}>{c.name}</button>
+          {/if}
+        {/each}
+      </nav>
+      {#if fileKind}<RawRender kind={fileKind} />{/if}
+    </div>
+  {/if}
+  <div class="cols">
   <div class="list" bind:this={list}>
-    {#if pick?.dir}<div class="dir">{pick.dir}</div>{/if}
+    {#if pick?.dir && !pick?.crumbs?.length}<div class="dir">{pick.dir}</div>{/if}
     {#if pick?.err}<div class="msg">{pick.err}</div>{/if}
     {#each pick?.items ?? [] as it, i (it.value)}
       <button class="row" class:on={i === sel} class:isdir={it.dir} onclick={() => onselect(i)} ondblclick={() => onchoose(i)}>
@@ -43,9 +79,18 @@
       <CommitView d={preview} />
     {:else if kind === 'switch' && preview?.kind === 'branch'}
       <BranchView d={preview} />
+    {:else if fileKind === 'md' && view.md && Array.isArray(preview)}
+      <Markdown text={linesToText(preview)} />
+    {:else if fileKind === 'img' && picture}
+      <ImageView info={picture} drawn={view.img} />
+    {:else if fileKind === 'svg' && view.svg && picture}
+      <ImageView info={picture} drawn />
+    {:else if fileKind === 'img'}
+      <div class="msg">…</div>
     {:else if Array.isArray(preview)}
       <Lines lines={preview} />
     {/if}
+  </div>
   </div>
 </section>
 
@@ -56,10 +101,23 @@
     width: 100%;
     max-width: var(--col);
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0 14px;
+  }
+  /* The bar over the list: the folders above this one, each a jump back; the view switch on the right. */
+  .bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; padding: 0 4px 8px; margin-bottom: 8px; border-bottom: 1px solid var(--divider); }
+  .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; font: 12.5px var(--mono); }
+  .crumb { background: none; border: 0; border-radius: 5px; padding: 1px 6px; color: var(--dim); font: inherit; cursor: pointer; }
+  .crumb:hover { color: var(--accent); background: var(--accent-soft); }
+  .here { padding: 1px 6px; color: var(--strong); font-weight: 600; }
+  .sep { color: var(--line); }
+  .cols {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: minmax(220px, 2fr) 3fr;
     gap: 16px;
-    padding: 4px 0 14px;
   }
   .list, .pane { min-height: 0; overflow: auto; }
   .pane { border-left: 1px solid var(--divider); padding: 0 0 0 16px; }

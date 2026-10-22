@@ -82,11 +82,18 @@ type uiItem struct {
 	Refs  []logRef `json:"refs,omitempty"` // /log: the tags and the other branches on the commit
 }
 
+// uiCrumb is one folder of the path above the list: its name, and what to type to list it.
+type uiCrumb struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+}
+
 type uiPick struct {
-	Dir   string   `json:"dir"` // /open: the folder that is listed
-	Up    string   `json:"up"`  // /open: what to type to go to its parent
-	Items []uiItem `json:"items"`
-	Err   string   `json:"err"`
+	Crumbs []uiCrumb `json:"crumbs,omitempty"` // /open: the folders from home (or the root) down to the listed one
+	Dir    string    `json:"dir"`              // /open: the folder that is listed
+	Up     string    `json:"up"`               // /open: what to type to go to its parent
+	Items  []uiItem  `json:"items"`
+	Err    string    `json:"err"`
 }
 
 const uiPickMax = 300
@@ -101,6 +108,31 @@ func queryFor(workdir, dir string) string {
 		return rel + "/"
 	}
 	return strings.TrimSuffix(tildify(dir), "/") + "/"
+}
+
+// uiCrumbs are the folders from home (or the root, outside home) down to dir.
+func uiCrumbs(workdir, dir string) []uiCrumb {
+	home, _ := os.UserHomeDir()
+	var chain []string
+	for d := dir; ; d = filepath.Dir(d) {
+		chain = append(chain, d)
+		if d == filepath.Dir(d) || (home != "" && d == home) {
+			break
+		}
+	}
+	out := make([]uiCrumb, 0, len(chain))
+	for i := len(chain) - 1; i >= 0; i-- {
+		d := chain[i]
+		name := filepath.Base(d)
+		switch {
+		case home != "" && d == home:
+			name = "~"
+		case d == filepath.Dir(d):
+			name = string(filepath.Separator)
+		}
+		out = append(out, uiCrumb{name, queryFor(workdir, d)})
+	}
+	return out
 }
 
 // kind is "open", "workdir", "log", "switch" or "resume".
@@ -118,7 +150,7 @@ func uiPickList(workdir, kind, query string) uiPick {
 	}
 	parent, needle := filepath.Split(query)
 	dir := workPath(workdir, parent)
-	pick := uiPick{Dir: tildify(dir), Items: []uiItem{}}
+	pick := uiPick{Dir: tildify(dir), Crumbs: uiCrumbs(workdir, dir), Items: []uiItem{}}
 	if up := filepath.Dir(dir); up != dir {
 		pick.Up = queryFor(workdir, up)
 	}

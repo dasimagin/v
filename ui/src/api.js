@@ -58,6 +58,7 @@ export const list = (kind, query) =>
     ? window.vList(kind, query)
     : Promise.resolve({
         dir: '~/sandbox/v',
+        crumbs: [{ name: '~', query: '~/' }, { name: 'sandbox', query: '~/sandbox/' }, { name: 'v', query: '' }],
         up: '',
         err: '',
         items: kind === 'log'
@@ -69,8 +70,12 @@ export const list = (kind, query) =>
             ]
           : kind === 'switch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]
-          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/main.go', label: 'main.go' }].filter((i) => i.label.includes(query.split('/').pop())),
+          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }].filter((i) => i.label.includes(query.split('/').pop())),
       })
+const mockMd = [
+  '# Vibing', '', 'A **graphical** front end for `v`, with *tabs*, tables and [a link](https://example.com).', '', '## Features', '', '- Chat with the agent', '- Shell mode', '  - runs in a pty', '1. First', '2. Second', '',
+  '> A quote that wraps over a few lines of the preview pane.', '', '| Mode | Key |', '| --- | --- |', '| agent | `*` |', '| shell | `$` |', '', '```go', 'func main() {}', '```', '', '---',
+].map((t) => [{ t }])
 const mockRows = [
   { k: 'hunk', old: 0, new: 0, t: '@@ -1,3 +1,4 @@ func main() {' },
   { k: 'ctx', old: 1, new: 1, t: 'args, gui := takeFlag(os.Args[1:], "--ui")' },
@@ -84,8 +89,18 @@ const mockDetail = (kind) =>
     : { kind: 'branch', ref: 'feature/ui', current: 'master', isCurrent: false, ahead: 4, behind: 1, add: 420, del: 18, err: '',
         files: [{ path: 'ui/src/App.svelte', add: 300, del: 10 }, { path: 'gui.go', add: 120, del: 8 }],
         commits: [{ short: '07596a8', subject: 'Move start-screen jokes', author: 'Denis', rel: '2 hours ago' }, { short: '1569d5e', subject: 'Do not listen to the agent again', author: 'Denis', rel: 'yesterday' }] }
-export const preview = (kind, value) => (window.vPreview ? window.vPreview(kind, value) : Promise.resolve(kind === 'log' || kind === 'switch' ? mockDetail(kind) : mockLines))
+export const preview = (kind, value) =>
+  window.vPreview
+    ? window.vPreview(kind, value)
+    : Promise.resolve(kind === 'log' || kind === 'switch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : mockLines)
 export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, lang: 'Go', lines: mockLines, err: '' }))
+export const imageInfo = (path) =>
+  window.vImage
+    ? window.vImage(path)
+    : Promise.resolve({
+        path, name: path.split('/').pop(), mime: path.endsWith('.svg') ? 'image/svg+xml' : 'image/png', size: 48213, width: 192, height: 192, modified: '3 days ago',
+        data: 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="#61afef"/><path d="M40 50h28l28 70 28-70h28L110 150H82z" fill="#fff"/></svg>'),
+      })
 export const setWorkdir = (path) => (window.vSetWorkdir ? window.vSetWorkdir(path) : Promise.resolve({ ...sample, workdir: path }))
 
 // The agent: events come back through window.vEvent (see onAgent).

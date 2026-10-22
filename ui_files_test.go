@@ -156,3 +156,39 @@ func TestDiffContextOptions(t *testing.T) {
 		t.Error("7 is not one of the choices")
 	}
 }
+
+func TestUIImage(t *testing.T) {
+	dir := t.TempDir()
+	svg := filepath.Join(dir, "a.svg")
+	os.WriteFile(svg, []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 96"><rect/></svg>`), 0o644)
+	i := uiImageOf(svg)
+	if i.Err != "" || i.Mime != "image/svg+xml" || i.Width != 192 || i.Height != 96 || !strings.HasPrefix(i.Data, "data:image/svg+xml;base64,") {
+		t.Errorf("svg: %+v", i)
+	}
+	// A 1x1 PNG.
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 0x0d, 'I', 'D', 'A', 'T', 0x78, 0x9c, 0x63, 0xf8, 0xff, 0xff, 0x3f, 0, 5, 0xfe, 2, 0xfe, 0xa7, 0x35, 0x81, 0x84, 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xae, 0x42, 0x60, 0x82}
+	p := filepath.Join(dir, "b.png")
+	os.WriteFile(p, png, 0o644)
+	if i := uiImageOf(p); i.Width != 1 || i.Height != 1 || i.Mime != "image/png" {
+		t.Errorf("png: %+v", i)
+	}
+	os.WriteFile(filepath.Join(dir, "c.txt"), []byte("x"), 0o644)
+	if i := uiImageOf(filepath.Join(dir, "c.txt")); i.Err == "" {
+		t.Error("a text file is not a picture")
+	}
+}
+
+func TestUICrumbs(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	work := filepath.Join(home, "a", "b")
+	cs := uiCrumbs(work, filepath.Join(work, "c", "d"))
+	if len(cs) < 5 || cs[0].Name != "~" || cs[len(cs)-1].Name != "d" || cs[len(cs)-1].Query != "c/d/" {
+		t.Errorf("crumbs below the workdir: %+v", cs)
+	}
+	if cs[len(cs)-3].Name != "b" || cs[len(cs)-3].Query != "" {
+		t.Errorf("the workdir itself is typed as nothing: %+v", cs)
+	}
+	if up := uiCrumbs(work, filepath.Join(home, "a")); up[len(up)-1].Query != "~/a/" {
+		t.Errorf("a folder above the workdir is typed with ~: %+v", up)
+	}
+}

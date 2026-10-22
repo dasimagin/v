@@ -24,11 +24,19 @@ const sample = {
 
 let options = [
   { key: 'theme', label: 'Color theme', desc: 'The colors of the window', current: 'dark',
-    choices: [{ id: 'dark', name: 'One Dark Pro' }, { id: 'light', name: 'Light' }] },
+    choices: [{ id: 'dark', name: 'One Dark Pro' }, ...['Dracula', 'Nord', 'Gruvbox', 'Solarized Dark', 'Tokyo Night', 'Catppuccin', 'Monokai', 'Everforest'].map((n) => ({ id: n, name: n })), { id: 'light', name: 'Light' }] },
   { key: 'model', label: 'Model', desc: 'The model the agent runs on', current: 'opus',
     choices: [{ id: 'fable', name: 'Fable 5.1' }, { id: 'opus', name: 'Opus 5.5' }, { id: 'sonnet', name: 'Sonnet 5.5' }] },
   { key: 'effort', label: 'Effort', desc: 'How hard the model thinks', current: 'high',
     choices: ['low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, name: id })) },
+  { key: 'detail', label: 'Chat detail', desc: "How much of the agent's work the chat shows. The slider above the input changes it too", current: 'commands',
+    choices: ['answer', 'edit', 'commands', 'thinking'].map((id) => ({ id, name: id })) },
+  { key: 'diff_before', label: 'Diff context before', desc: 'Unchanged lines shown above each change, in every diff', current: '3',
+    choices: [0, 1, 2, 3, 5, 8, 10, 15, 20, 30, 50].map((n) => ({ id: String(n), name: n === 1 ? '1 line' : n + ' lines' })) },
+  { key: 'diff_after', label: 'Diff context after', desc: 'Unchanged lines shown below each change, in every diff', current: '3',
+    choices: [0, 1, 2, 3, 5, 8, 10, 15, 20, 30, 50].map((n) => ({ id: String(n), name: n === 1 ? '1 line' : n + ' lines' })) },
+  { key: 'mode', label: 'Permissions', desc: 'Manual asks before every edit and command; Auto goes on its own', current: 'manual',
+    choices: [{ id: 'manual', name: 'manual' }, { id: 'auto', name: 'auto' }] },
 ]
 
 export const start = () => (window.vStart ? window.vStart() : Promise.resolve(sample))
@@ -79,13 +87,17 @@ export const setWorkdir = (path) => (window.vSetWorkdir ? window.vSetWorkdir(pat
 export const onAgent = (fn) => {
   window.vEvent = fn
 }
-export const send = (text) => {
-  if (window.vSend) return window.vSend(text)
+export const send = (text, context = '') => {
+  if (window.vSend) return window.vSend(text, context)
   // In a plain browser there is no agent: play a short reply.
   const e = (x, ms) => setTimeout(() => window.vEvent?.(x), ms)
   e({ kind: 'text-start' }, 200)
   e({ kind: 'text', text: 'This is a sample reply with `inline code`:\n\n```go\nfunc main() {}\n```\n' }, 400)
-  e({ kind: 'tool', text: 'Edit main.go' }, 600)
+  e({ kind: 'thinking-start' }, 100)
+  e({ kind: 'thinking', text: 'The user wants the jokes in a file.\nI will edit main.go.' }, 150)
+  e({ kind: 'tool', text: 'Bash go test ./...', tool: 'Bash', toolId: 't0', detail: 'go test ./...' }, 500)
+  e({ kind: 'tool-result', toolId: 't0', text: 'ok  \tgithub.com/dasimagin/v\t1.2s\n' }, 560)
+  e({ kind: 'tool', text: 'Edit main.go', tool: 'Edit', toolId: 't1', detail: '- func main() {}\n+ func main() {\n+ \trunUI()\n+ }' }, 600)
   e({ kind: 'ask', id: 'r1', text: 'Edit main.go', tool: 'Edit' }, 700)
   return Promise.resolve()
 }
@@ -103,23 +115,68 @@ export const resume = (path) =>
 
 const mockPR = {
   number: 42, title: 'Add the graphical UI', url: 'https://github.com/dasimagin/v/pull/42', author: 'dasimagin', state: 'open',
-  base: 'master', head: 'ui-experiment', draft: false, labels: ['ui'],
-  files: [{ path: 'gui.go', adds: 90, dels: 0, threads: 1 }, { path: 'ui/src/App.svelte', adds: 410, dels: 12, threads: 0 }],
+  base: 'master', head: 'ui-experiment', draft: false, labels: ['ui'], viewer: 'dasimagin', pending: 1, summary: '', immediate: false, talk: 1,
+  files: [
+    { path: 'gui.go', adds: 90, dels: 0, threads: 1 },
+    { path: 'ui/src/App.svelte', adds: 410, dels: 12, threads: 0 },
+    { path: 'ui/src/Chat.svelte', adds: 120, dels: 4, threads: 1 },
+    { path: 'ui/src/style.css', adds: 20, dels: 2, threads: 0 },
+    { path: 'README.md', adds: 6, dels: 1, threads: 0 },
+  ],
+  threads: [
+    { id: 't1', path: 'gui.go', line: 2, resolved: false, outdated: false, author: 'reviewer', preview: 'Blank line needed here?', count: 2, pending: false },
+    { id: 't2', path: 'ui/src/Chat.svelte', line: 12, resolved: true, outdated: false, author: 'reviewer', preview: 'Why a second slider?', count: 1, pending: true },
+  ],
 }
 export const loadPR = (arg) => (window.vPR ? window.vPR(arg) : Promise.resolve(mockPR))
+const act = (name, ...args) => (window[name] ? window[name](...args) : Promise.resolve(mockPR))
+export const prReply = (thread, body) => act('vPRReply', thread, body)
+export const prComment = (path, start, line, body) => act('vPRComment', path, start, line, body)
+export const prChecks = () =>
+  window.vPRChecks
+    ? window.vPRChecks()
+    : Promise.resolve([
+        { name: 'build', workflow: 'CI', bucket: 'pass', link: 'https://github.com/dasimagin/v/actions/runs/1', description: 'Build succeeded in 1m 2s' },
+        { name: 'test (ubuntu)', workflow: 'CI', bucket: 'fail', link: 'https://github.com/dasimagin/v/actions/runs/2', description: 'Tests failed: 2 of 410' },
+        { name: 'lint', workflow: 'CI', bucket: 'pending', link: 'https://github.com/dasimagin/v/actions/runs/3', description: 'In progress' },
+        { name: 'docs', workflow: 'Pages', bucket: 'skipping', link: '', description: '' },
+      ])
+export const openURL = (u) => (window.vOpenURL ? window.vOpenURL(u) : window.open(u, '_blank'))
+export const prEdit = (title, body) => act('vPREdit', title, body)
+export const prTalk = (body, summary) => act('vPRTalk', body, summary)
+export const prResolve = (thread, resolved) => act('vPRResolve', thread, resolved)
+export const prDelete = (id, conversation) => act('vPRDelete', id, conversation)
+export const prSubmit = (verdict, summary) => act('vPRSubmit', verdict, summary)
 export const prView = (path) =>
   window.vPRView
     ? window.vPRView(path)
     : Promise.resolve(
         path === ''
-          ? { body: 'Adds a window with the start screen, `/open`, `/show` and `/pr`.\n\n```sh\ngo run . --ui\n```', reviews: [{ author: 'reviewer', when: '2h ago', state: 'changes requested', body: 'Please split the omnibox.' }], comments: [{ author: 'dasimagin', when: '1h ago', body: 'Done.' }], lines: [], outdated: [] }
+          ? { body: 'Adds a window with the start screen, `/open`, `/show` and `/pr`.\n\n```sh\ngo run . --ui\n```', reviews: [{ author: 'reviewer', when: '2h ago', state: 'changes requested', body: 'Please split the omnibox.' }], comments: [{ id: 'c1', mine: true, author: 'dasimagin', when: '1h ago', body: 'Done.' }], lines: [], outdated: [], summary: '' }
           : { body: '', reviews: [], comments: [], outdated: [], lines: [
               { k: 'head', t: 'diff --git a/gui.go b/gui.go' },
               { k: 'hunk', t: '@@ -0,0 +1,4 @@' },
               { k: 'add', no: 1, t: '+package main' },
-              { k: 'add', no: 2, t: '+', threads: [{ resolved: false, outdated: false, comments: [{ author: 'reviewer', when: '2h ago', body: 'Blank line needed here?' }, { author: 'dasimagin', when: '1h ago', body: 'Yes, gofmt.' }] }] },
-              { k: 'del', t: '-old' },
-              { k: 'ctx', no: 3, t: ' func main() {}' },
+              { k: 'add', no: 2, t: '+', threads: [{ id: 't1', path: 'gui.go', line: 2, resolved: false, outdated: false, comments: [{ id: 'a', author: 'reviewer', when: '2h ago', body: 'Blank line needed here?' }, { id: 'b', mine: true, pending: true, author: 'dasimagin', when: '1h ago', body: 'Yes, gofmt.' }] }] },
+              { k: 'del', old: 1, t: '-func old() {}' },
+              { k: 'del', old: 2, t: '-\treturn 1' },
+              { k: 'add', no: 3, t: '+func renamed() {' },
+              { k: 'add', no: 4, t: '+\treturn 2' },
+              { k: 'add', no: 5, t: '+\t// a very long added line that has to wrap in the side by side layout when the column is narrow' },
+              { k: 'ctx', old: 3, no: 6, t: ' func main() {}' },
+              { k: 'ctx', old: 4, no: 7, t: ' ' },
             ] },
       )
 export const quit = () => (window.vQuit ? window.vQuit() : undefined)
+
+// The shell mode: output comes back as shell-out and shell-done events.
+export const shell = (id, cmd, cols) => {
+  if (window.vShell) return window.vShell(id, cmd, cols)
+  const e = (x, ms) => setTimeout(() => window.vEvent?.(x), ms)
+  e({ kind: 'shell-out', id, text: 'total 8\n-rw-r--r--  1 you  staff  412 main.go\n' }, 250)
+  e({ kind: 'shell-out', id, text: 'drwxr-xr-x  9 you  staff  288 ui\n' }, 450)
+  e({ kind: 'shell-done', id, turns: 0 }, 650)
+  return Promise.resolve()
+}
+export const shellStop = (id) => (window.vShellStop ? window.vShellStop(id) : Promise.resolve())
+export const branchPRs = () => (window.vBranchPRs ? window.vBranchPRs() : Promise.resolve([{ number: 42, title: 'Add the graphical UI', url: 'https://github.com/dasimagin/v/pull/42', state: 'open' }]))

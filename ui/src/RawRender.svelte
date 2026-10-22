@@ -14,8 +14,8 @@
 </span>
 
 <style>
-  .seg { display: flex; padding: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; font: 12px 'Inter', sans-serif; }
-  button { background: none; border: 0; border-radius: 5px; padding: 1px 12px; color: var(--dim); cursor: pointer; }
+  .seg { display: flex; box-sizing: border-box; height: 28px; align-items: stretch; padding: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; font: 12px 'Inter', sans-serif; }
+  button { background: none; border: 0; border-radius: 5px; padding: 0 12px; display: grid; place-items: center; color: var(--dim); cursor: pointer; }
   button:hover { color: var(--text); }
   button.on { background: var(--accent-soft); color: var(--accent); }
 </style>

@@ -46,7 +46,7 @@
           {/if}
         {/each}
       </nav>
-      {#if fileKind}<RawRender kind={fileKind} />{/if}
+      <div class="switch">{#if fileKind}<RawRender kind={fileKind} />{/if}</div>
     </div>
   {/if}
   <div class="cols">
@@ -108,8 +108,10 @@
     padding: 4px 0 14px;
   }
   /* The bar over the list: the folders above this one, each a jump back; the view switch on the right. */
-  .bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; padding: 0 4px 8px; margin-bottom: 8px; border-bottom: 1px solid var(--divider); }
-  .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; font: 12.5px var(--mono); }
+  .bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; padding: 0 4px 8px; margin-bottom: 8px; border-bottom: 1px solid var(--divider); box-sizing: border-box; }
+  /* The switch has its place whether it is shown or not, so that nothing moves when it appears. */
+  .switch { flex: none; width: 124px; height: 28px; display: flex; align-items: center; justify-content: flex-end; }
+  .crumbs { display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 2px; min-width: 0; font: 12.5px var(--mono); }
   .crumb { background: none; border: 0; border-radius: 5px; padding: 1px 6px; color: var(--dim); font: inherit; cursor: pointer; }
   .crumb:hover { color: var(--accent); background: var(--accent-soft); }
   .here { padding: 1px 6px; color: var(--strong); font-weight: 600; }

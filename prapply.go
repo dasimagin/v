@@ -136,7 +136,7 @@ func (m *model) sendApply(d *prData, refs []applyRef) tea.Cmd {
 		m.noteErr(err.Error())
 		return nil
 	}
-	auto := m.settings.ApplyMode == reviewAuto
+	auto := m.settings.Mode == reviewAuto
 	if !m.enterRun("apply", fmt.Sprintf("PR #%d", d.Number), auto) {
 		return nil
 	}

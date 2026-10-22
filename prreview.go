@@ -377,7 +377,7 @@ func (m *model) onReviewReady(msg reviewReadyMsg) tea.Cmd {
 		return nil
 	}
 	d := msg.data
-	auto := m.settings.ReviewMode == reviewAuto
+	auto := m.settings.Mode == reviewAuto
 	if !m.enterRun("review", fmt.Sprintf("PR #%d", d.Number), auto) {
 		return nil
 	}

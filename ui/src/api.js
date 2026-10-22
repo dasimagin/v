@@ -70,12 +70,15 @@ export const list = (kind, query) =>
             ]
           : kind === 'branch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]
-          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }].filter((i) => i.label.includes(query.split('/').pop())),
+          : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/README.md', label: 'README.md' }, { value: '/x/logo.svg', label: 'logo.svg' }, { value: '/x/shot.png', label: 'shot.png' }, { value: '/x/main.go', label: 'main.go' }, { value: '/x/package.json', label: 'package.json' }].filter((i) => i.label.includes(query.split('/').pop())),
       })
 const mockMd = [
   '# Vibing', '', 'A **graphical** front end for `v`, with *tabs*, tables and [a link](https://example.com).', '', '## Features', '', '- Chat with the agent', '- Shell mode', '  - runs in a pty', '1. First', '2. Second', '',
   '> A quote that wraps over a few lines of the preview pane.', '', '| Mode | Key |', '| --- | --- |', '| agent | `*` |', '| shell | `$` |', '', '```go', 'func main() {}', '```', '', '---',
 ].map((t) => [{ t }])
+const mockJson = JSON.stringify({ name: 'vibing-ui', version: '0.1.0', private: true, scripts: { dev: 'vite', build: 'vite build' }, dependencies: { svelte: '^5.0.0', yaml: '^2.8.0' }, files: ['dist', 'README.md'], nested: { deep: { deeper: { deepest: [1, 2, 3, null, true] } } } }, null, 2)
+  .split('\n')
+  .map((t) => [{ t }])
 const mockRows = [
   { k: 'hunk', old: 0, new: 0, t: '@@ -1,3 +1,4 @@ func main() {' },
   { k: 'ctx', old: 1, new: 1, t: 'args, gui := takeFlag(os.Args[1:], "--ui")' },
@@ -92,7 +95,7 @@ const mockDetail = (kind) =>
 export const preview = (kind, value) =>
   window.vPreview
     ? window.vPreview(kind, value)
-    : Promise.resolve(kind === 'log' || kind === 'branch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : mockLines)
+    : Promise.resolve(kind === 'log' || kind === 'branch' ? mockDetail(kind) : value.endsWith('.md') ? mockMd : value.endsWith('.json') ? mockJson : mockLines)
 export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, abs: path, lang: 'Go', lines: mockLines, err: '', text: mockLines.map((l) => l.map((s) => s.t).join('')).join('\n'), crlf: false, mtime: 1, edit: true }))
 export const imageInfo = (path) =>
   window.vImage

@@ -1,6 +1,6 @@
-// What a file shows as: Markdown rendered or as source, an SVG drawn or as code, a picture drawn or
-// as its properties. Each is remembered; Markdown starts rendered, the others as text.
-const DEFAULTS = { md: true, svg: false, img: false }
+// What a file shows as: Markdown rendered or as source, JSON and YAML as a tree or as text, an SVG drawn or as
+// code, a picture drawn or as its properties. Each is remembered; Markdown, JSON and YAML start rendered.
+const DEFAULTS = { md: true, json: true, yaml: true, svg: false, img: false }
 
 function read(k) {
   try {
@@ -11,7 +11,7 @@ function read(k) {
   }
 }
 
-export const view = $state({ md: read('md'), svg: read('svg'), img: read('img') })
+export const view = $state({ md: read('md'), json: read('json'), yaml: read('yaml'), svg: read('svg'), img: read('img') })
 
 export function setRender(k, v) {
   view[k] = v
@@ -20,10 +20,12 @@ export function setRender(k, v) {
   } catch {}
 }
 
-// What kind of file this is for the switch: md, svg, img, or '' when there is nothing to switch.
+// What kind of file this is for the switch: md, json, yaml, svg, img, or '' when there is nothing to switch.
 export function kindOf(path) {
   if (/\.(md|markdown|mdx)$/i.test(path ?? '')) return 'md'
   if (/\.svg$/i.test(path ?? '')) return 'svg'
+  if (/\.json$/i.test(path ?? '')) return 'json'
+  if (/\.ya?ml$/i.test(path ?? '')) return 'yaml'
   if (/\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(path ?? '')) return 'img'
   return ''
 }

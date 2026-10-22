@@ -2,6 +2,7 @@
   import Lines from './Lines.svelte'
   import Markdown from './Markdown.svelte'
   import ImageView from './ImageView.svelte'
+  import Tree from './Tree.svelte'
   import RawRender from './RawRender.svelte'
   import Editor from './Editor.svelte'
   import { linesToText } from './markdown.js'
@@ -15,7 +16,7 @@
   export const find = (dir) => editor?.find(dir)
 
   const kind = $derived(kindOf(file.path))
-  const rendered = $derived((kind === 'md' && view.md) || (kind === 'svg' && view.svg))
+  const rendered = $derived(kind !== '' && kind !== 'img' && view[kind])
   let text = $state('') // what the editor holds right now, saved or not
   let picture = $state(null)
   let seq = 0
@@ -49,7 +50,7 @@
   {:else}
     {#if rendered}
       <div class="body">
-        {#if kind === 'md'}<Markdown text={source} />{:else if svgInfo}<ImageView info={svgInfo} drawn />{/if}
+        {#if kind === 'md'}<Markdown text={source} />{:else if kind === 'json' || kind === 'yaml'}<Tree text={source} {kind} />{:else if svgInfo}<ImageView info={svgInfo} drawn />{/if}
       </div>
     {/if}
     <div class="edit" hidden={rendered}>

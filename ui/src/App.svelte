@@ -72,9 +72,9 @@
         await startPR('')
         setTimeout(() => prview?.key({ key: 'ArrowRight' }, ''), 100)
         for (let i = 0; i < 4; i++) setTimeout(() => prview?.key({ key: 'ArrowDown' }, ''), 200 + i * 50)
-      } else if (['openmd', 'opensvg', 'openpng'].includes(name)) {
+      } else if (['openmd', 'opensvg', 'openpng', 'openjson'].includes(name)) {
         onrun('open', '')
-        setTimeout(() => select({ openmd: 1, opensvg: 2, openpng: 3 }[name]), 300)
+        setTimeout(() => select({ openmd: 1, opensvg: 2, openpng: 3, openjson: 5 }[name]), 300)
       } else if (name === 'openfile') {
         onrun('open', '')
         setTimeout(() => choose(4), 300)

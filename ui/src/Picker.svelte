@@ -4,6 +4,7 @@
   import BranchView from './BranchView.svelte'
   import Markdown from './Markdown.svelte'
   import ImageView from './ImageView.svelte'
+  import Tree from './Tree.svelte'
   import RawRender from './RawRender.svelte'
   import { linesToText } from './markdown.js'
   import { view, kindOf } from './prefs.svelte.js'
@@ -80,6 +81,8 @@
       <BranchView d={preview} />
     {:else if fileKind === 'md' && view.md && Array.isArray(preview)}
       <Markdown text={linesToText(preview)} />
+    {:else if (fileKind === 'json' || fileKind === 'yaml') && view[fileKind] && Array.isArray(preview)}
+      <Tree text={linesToText(preview)} kind={fileKind} />
     {:else if fileKind === 'img' && picture}
       <ImageView info={picture} drawn={view.img} />
     {:else if fileKind === 'svg' && view.svg && picture}

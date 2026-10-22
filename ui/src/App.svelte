@@ -42,7 +42,7 @@
     file: '/ for commands · Esc closes the file',
   }
   const placeholder = $derived(placeholders[screen] ?? 'Ask the agent, or type / for commands')
-  const picking = $derived(['open', 'show', 'workdir', 'switch', 'resume'].includes(screen))
+  const picking = $derived(['open', 'log', 'workdir', 'switch', 'resume'].includes(screen))
 
   onMount(async () => {
     onAgent(onagent)
@@ -110,7 +110,7 @@
         startPR(arg)
         return
       case 'open':
-      case 'show':
+      case 'log':
       case 'workdir':
       case 'switch':
       case 'resume':
@@ -341,7 +341,7 @@
     if (screen === 'workdir') return chooseWorkdir(it)
     if (screen === 'switch') return chooseBranch(it)
     if (screen === 'resume') return resumeSession(it)
-    if (screen === 'show') return
+    if (screen === 'log') return
     if (it.dir) return omni?.setText(it.query)
     openedFile = await readFile(it.value)
     cameFrom = screen
@@ -561,7 +561,7 @@
   {#if screen === 'config'}
     <Config {options} {query} {sel} {onset} onback={back} onselect={(i) => (sel = i)} />
   {:else if picking}
-    <Picker kind={screen} {pick} {sel} preview={previewLines} empty={screen === 'show' ? 'No commits match' : 'Nothing matches'} onselect={select} onchoose={choose} />
+    <Picker kind={screen} {pick} {sel} preview={previewLines} empty={screen === 'log' ? 'No commits match' : 'Nothing matches'} onselect={select} onchoose={choose} />
   {:else if screen === 'pr'}
     {#if pr}
       <PRView bind:this={prview} bind:pr {query} />

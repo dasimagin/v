@@ -101,7 +101,7 @@ func openWindow(startDir string) error {
 	}
 	if err := w.Bind("vPreview", func(kind, value string) any {
 		switch kind {
-		case "show":
+		case "log":
 			return uiCommitOf(wd.get(), value)
 		case "switch":
 			return uiBranchOf(wd.get(), value)

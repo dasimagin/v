@@ -34,6 +34,7 @@ type uiCommitDetail struct {
 	Rel       string       `json:"rel"`
 	Subject   string       `json:"subject"`
 	Body      string       `json:"body"`
+	Refs      []logRef     `json:"refs"`
 	Files     []uiFileDiff `json:"files"`
 	MoreFiles int          `json:"moreFiles"`
 	Err       string       `json:"err"`
@@ -45,19 +46,20 @@ const (
 )
 
 func uiCommitOf(dir, hash string) uiCommitDetail {
-	d := uiCommitDetail{Kind: "commit", Hash: hash, Files: []uiFileDiff{}}
+	d := uiCommitDetail{Kind: "commit", Hash: hash, Files: []uiFileDiff{}, Refs: []logRef{}}
 	const sep = "\x1f"
-	out, err := gitOutput(dir, "show", "-s", "--date=format:%Y-%m-%d %H:%M", "--format=%H"+sep+"%h"+sep+"%an"+sep+"%ae"+sep+"%ad"+sep+"%cr"+sep+"%s"+sep+"%b", hash, "--")
+	out, err := gitOutput(dir, "show", "-s", "--date=format:%Y-%m-%d %H:%M", "--format=%H"+sep+"%h"+sep+"%an"+sep+"%ae"+sep+"%ad"+sep+"%cr"+sep+"%s"+sep+"%D"+sep+"%b", hash, "--")
 	if err != nil {
 		d.Err = err.Error()
 		return d
 	}
-	f := strings.SplitN(out, sep, 8)
-	if len(f) < 8 {
+	f := strings.SplitN(out, sep, 9)
+	if len(f) < 9 {
 		d.Err = "unexpected output from git"
 		return d
 	}
-	d.Hash, d.Short, d.Author, d.Email, d.Date, d.Rel, d.Subject, d.Body = f[0], f[1], f[2], f[3], f[4], f[5], f[6], strings.TrimSpace(f[7])
+	d.Refs = parseRefs(f[7], gitRemotes(dir))
+	d.Hash, d.Short, d.Author, d.Email, d.Date, d.Rel, d.Subject, d.Body = f[0], f[1], f[2], f[3], f[4], f[5], f[6], strings.TrimSpace(f[8])
 	patch, err := gitOutput(dir, "show", "--format=", "--no-color", fmt.Sprintf("-U%d", max(diffBefore, diffAfter)), hash, "--")
 	if err != nil {
 		d.Err = err.Error()

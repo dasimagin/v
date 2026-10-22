@@ -69,7 +69,7 @@ func uiLinesOf(lines [][]seg) uiLines {
 	return out
 }
 
-// uiItem is a row of a list: a file or folder for /open, a commit for /show.
+// uiItem is a row of a list: a file or folder for /open, a commit for /log.
 type uiItem struct {
 	Value string `json:"value"` // path or hash
 	Label string `json:"label"`
@@ -79,6 +79,9 @@ type uiItem struct {
 	Tag   string `json:"tag"`   // /switch: "current", "local" or "remote"
 	Sub   string `json:"sub"`   // /switch: the branch's latest commit
 	When  string `json:"when"`  // /switch: how long ago
+	// /log: the branches and tags on the commit, and where it sits in the graph.
+	Refs  []logRef  `json:"refs,omitempty"`
+	Graph *graphRow `json:"graph,omitempty"`
 }
 
 type uiPick struct {
@@ -86,6 +89,7 @@ type uiPick struct {
 	Up    string   `json:"up"`  // /open: what to type to go to its parent
 	Items []uiItem `json:"items"`
 	Err   string   `json:"err"`
+	Lanes int      `json:"lanes,omitempty"` // /log: how many lanes the widest row of the graph has
 }
 
 const uiPickMax = 300
@@ -102,11 +106,11 @@ func queryFor(workdir, dir string) string {
 	return strings.TrimSuffix(tildify(dir), "/") + "/"
 }
 
-// kind is "open", "workdir", "show", "switch" or "resume".
+// kind is "open", "workdir", "log", "switch" or "resume".
 func uiPickList(workdir, kind, query string) uiPick {
 	switch kind {
-	case "show":
-		return uiShowList(workdir, query)
+	case "log":
+		return uiLogList(workdir, query)
 	case "switch":
 		return uiSwitchList(workdir, query)
 	case "resume":
@@ -174,22 +178,31 @@ func uiPickList(workdir, kind, query string) uiPick {
 	return pick
 }
 
-func uiShowList(workdir, query string) uiPick {
+// uiLogList lists the commits of all branches; while nothing is typed, each carries its row of the graph.
+func uiLogList(workdir, query string) uiPick {
 	pick := uiPick{Items: []uiItem{}}
-	commits, err := loadCommits(workdir)
+	commits, err := loadLog(workdir)
 	if err != nil {
 		pick.Err = "No history here · " + err.Error()
 		return pick
 	}
+	graph := buildGraph(commits)
+	showGraph := strings.TrimSpace(query) == ""
 	type scored struct {
 		uiItem
 		score int
 	}
 	var found []scored
-	for _, c := range commits {
+	for i, c := range commits {
 		score, ok := fuzzyScore(query, c.Short+" "+c.Subject+" "+c.Author)
 		if ok {
-			found = append(found, scored{uiItem{Value: c.Hash, Label: c.Subject, Meta: c.Short + " · " + c.Author + " · " + c.When}, score})
+			it := uiItem{Value: c.Hash, Label: c.Subject, Meta: c.Short + " · " + c.Author + " · " + c.When, Refs: c.Refs}
+			if showGraph {
+				row := graph[i]
+				it.Graph = &row
+				pick.Lanes = max(pick.Lanes, min(row.Lanes, graphMaxLanes))
+			}
+			found = append(found, scored{it, score})
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].score > found[j].score })
@@ -314,7 +327,7 @@ func uiPickPreview(workdir, kind, value string) uiLines {
 		return uiLines{}
 	}
 	switch kind {
-	case "show":
+	case "log":
 		return uiLinesOf(commitPreview(workdir, value))
 	case "switch":
 		return uiLinesOf(branchPreview(workdir, value))

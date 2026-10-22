@@ -11,7 +11,7 @@ const sample = {
   git: { branch: 'ui-experiment', dirty: 3 },
   commands: [
     { name: 'pr', args: '[URL | number]', desc: "Read this branch's PR", supported: true },
-    { name: 'show', desc: "Browse this branch's history", supported: true },
+    { name: 'log', aliases: ['show'], desc: 'Browse the history of all branches, with their tags', supported: true },
     { name: 'workdir', args: '[directory]', desc: 'Find and choose the working directory', supported: true },
     { name: 'switch', aliases: ['branch'], args: '[name]', desc: 'Find and switch Git branches', supported: true },
     { name: 'open', args: '[path]', desc: 'Find and open a file', supported: true },
@@ -60,8 +60,14 @@ export const list = (kind, query) =>
         dir: '~/sandbox/v',
         up: '',
         err: '',
-        items: kind === 'show'
-          ? [{ value: 'a1', label: 'Move start-screen jokes to taglines.txt', meta: '07596a8 · Denis · 2 hours ago' }]
+        lanes: kind === 'log' ? 2 : 0,
+        items: kind === 'log'
+          ? [
+              { value: 'a1', label: 'Merge the graphical UI', meta: '9d3e2f1 · Denis · 1 hour ago', refs: [{ name: 'master', kind: 'head' }, { name: 'origin/master', kind: 'remote' }, { name: 'v0.3', kind: 'tag' }], graph: { node: 0, lanes: 2, pass: [], in: [], out: [0, 1] } },
+              { value: 'a2', label: 'Move start-screen jokes to taglines.txt', meta: '07596a8 · Denis · 2 hours ago', refs: [], graph: { node: 0, lanes: 2, pass: [1], in: [], out: [0] } },
+              { value: 'a3', label: 'Add the PR screen', meta: '3c1d9aa · Denis · 3 hours ago', refs: [{ name: 'ui-experiment', kind: 'branch' }], graph: { node: 1, lanes: 2, pass: [0], in: [], out: [1] } },
+              { value: 'a4', label: 'Start the graphical UI', meta: '1569d5e · Denis · yesterday', refs: [{ name: 'v0.2', kind: 'tag' }], graph: { node: 0, lanes: 2, pass: [], in: [0, 1], out: [0] } },
+            ]
           : kind === 'switch'
           ? [{ value: 'master', label: 'master', tag: 'current', sub: 'Move start-screen jokes', when: '2 hours ago' }, { value: 'origin/feature', label: 'origin/feature', tag: 'remote', sub: 'Add the UI', when: 'yesterday' }]
           : [{ value: '/x/ui', label: 'ui/', dir: true, query: 'ui/' }, { value: '/x/main.go', label: 'main.go' }].filter((i) => i.label.includes(query.split('/').pop())),
@@ -73,13 +79,13 @@ const mockRows = [
   { k: 'add', old: 0, new: 2, t: 'if gui { runUI(args); return }' },
 ]
 const mockDetail = (kind) =>
-  kind === 'show'
-    ? { kind: 'commit', hash: 'a1b2c3', short: '07596a8', author: 'Denis Simagin', date: '2026-10-21 12:30', rel: '2 hours ago', subject: 'Move start-screen jokes to taglines.txt', body: '~/.v/taglines.txt overrides it.', moreFiles: 0, err: '',
+  kind === 'log'
+    ? { kind: 'commit', hash: 'a1b2c3', short: '07596a8', refs: [{ name: 'master', kind: 'head' }, { name: 'v0.3', kind: 'tag' }], author: 'Denis Simagin', date: '2026-10-21 12:30', rel: '2 hours ago', subject: 'Move start-screen jokes to taglines.txt', body: '~/.v/taglines.txt overrides it.', moreFiles: 0, err: '',
         files: [{ path: 'main.go', add: 12, del: 3, rows: mockRows, more: 0 }, { path: 'docs/taglines.txt', add: 30, del: 0, rows: mockRows, more: 0 }] }
     : { kind: 'branch', ref: 'feature/ui', current: 'master', isCurrent: false, ahead: 4, behind: 1, add: 420, del: 18, err: '',
         files: [{ path: 'ui/src/App.svelte', add: 300, del: 10 }, { path: 'gui.go', add: 120, del: 8 }],
         commits: [{ short: '07596a8', subject: 'Move start-screen jokes', author: 'Denis', rel: '2 hours ago' }, { short: '1569d5e', subject: 'Do not listen to the agent again', author: 'Denis', rel: 'yesterday' }] }
-export const preview = (kind, value) => (window.vPreview ? window.vPreview(kind, value) : Promise.resolve(kind === 'show' || kind === 'switch' ? mockDetail(kind) : mockLines))
+export const preview = (kind, value) => (window.vPreview ? window.vPreview(kind, value) : Promise.resolve(kind === 'log' || kind === 'switch' ? mockDetail(kind) : mockLines))
 export const file = (path) => (window.vFile ? window.vFile(path) : Promise.resolve({ path, lang: 'Go', lines: mockLines, err: '' }))
 export const setWorkdir = (path) => (window.vSetWorkdir ? window.vSetWorkdir(path) : Promise.resolve({ ...sample, workdir: path }))
 

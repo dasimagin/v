@@ -27,6 +27,9 @@
       <code class="hash" title={d.hash}>{d.short}</code>
     </header>
 
+    {#if d.refs?.length}
+      <div class="refs">{#each d.refs as r}<span class="ref {r.kind}">{r.name}</span>{/each}</div>
+    {/if}
     <h2>{d.subject}</h2>
     {#if d.body}<p class="body">{d.body}</p>{/if}
 
@@ -69,6 +72,12 @@
   .name { color: var(--strong); font-weight: 600; }
   .when { color: var(--dim); font-size: 12px; }
   .hash { background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 6px; font: 12px var(--mono); }
+  .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .ref { padding: 0 8px; border-radius: 999px; font: 11.5px/1.6 var(--mono); border: 1px solid var(--line); color: var(--dim); }
+  .ref.head { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+  .ref.branch { color: var(--c-added, #98e379); }
+  .ref.remote { color: var(--accent2); }
+  .ref.tag { color: #e5c07b; }
   h2 { margin: 14px 0 6px; font-size: 16px; line-height: 1.35; color: var(--strong); }
   .body { margin: 0 0 4px; white-space: pre-wrap; color: var(--text); line-height: 1.5; }
   .sum { margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--divider); color: var(--dim); font-size: 12px; }

@@ -26,6 +26,12 @@
   let openedFile = $state(null)
   // How the omnibox searches inside an open file: a regular expression, or fuzzy (the letters in order).
   let findMode = $state('regexp')
+  // The search in an open file has its choice in the omnibox, where the agent's settings are on the other screens.
+  const searchOption = $derived(
+    screen === 'file' && openedFile?.edit
+      ? { key: 'find', label: 'Search', current: findMode, choices: [{ id: 'regexp', name: 'regexp' }, { id: 'fuzzy', name: 'fuzzy' }] }
+      : null,
+  )
   let fileview = $state() // the open file's view, to search in it
   let fileQuery = $state('')
   let fileDirty = $state(false) // the open file has changes that are not saved
@@ -630,7 +636,7 @@
     </section>
   {/if}
 
-  <Omnibox bind:this={omni} commands={info?.commands ?? []} {options} {onset} {note}
+  <Omnibox bind:this={omni} {searchOption} onsearch={(_, id) => (findMode = id)} commands={info?.commands ?? []} {options} {onset} {note}
     workdir={info?.workdir ?? ''} git={info?.git} branches={branchList} prs={branchPrs} {onbranch} {onworkdir}
     placeholder={placeholder}
     filtering={screen !== 'home' && screen !== 'chat'} bind:level bind:mode busy={mode === 'shell' ? !!shellId : busy} onstop={stop} {onshell} {onrun} {onsend} {oninput} {onkey} />

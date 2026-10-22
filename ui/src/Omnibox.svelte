@@ -3,7 +3,7 @@
   import Dropdown from './Dropdown.svelte'
 
   // The input at the bottom: plain text goes to the agent, "/" opens command suggestions.
-  let { filtering = false, level = $bindable(2), mode = $bindable('agent'), commands, options, onset, note, busy = false, onstop, onshell, workdir, git, branches, prs = [], onbranch, onworkdir, placeholder, onrun, onsend, oninput, onkey: onextra } = $props()
+  let { filtering = false, searchOption = null, onsearch, level = $bindable(2), mode = $bindable('agent'), commands, options, onset, note, busy = false, onstop, onshell, workdir, git, branches, prs = [], onbranch, onworkdir, placeholder, onrun, onsend, oninput, onkey: onextra } = $props()
 
   let text = $state('')
   let sel = $state(0)
@@ -172,6 +172,7 @@
         {/if}
       {/if}
     {/if}
+    {#if !filtering}
     <div class="lvl" title="How much of the agent's work the chat shows">
       <span class="lname">{levels[level]}</span>
       <div class="track" role="slider" tabindex="-1" aria-label="Detail" aria-valuemin="0" aria-valuemax="3" aria-valuenow={level} aria-valuetext={levels[level]}
@@ -183,6 +184,7 @@
         {/each}
       </div>
     </div>
+    {/if}
   </div>
 
   <form class="prompt" onsubmit={(e) => { e.preventDefault(); submit() }}>
@@ -204,14 +206,20 @@
       ></textarea>
     </div>
     <div class="row">
-      <span class="note">{note || (shellMode ? 'Enter to run · ↑ history · Tab on an empty line: back to the agent · Ctrl+C stops' : 'Enter to send · Shift+Enter for a new line')}</span>
-      {#each dropdowns as o (o.key)}
-        <Dropdown option={o} {onset} />
-      {/each}
-      {#if busy && !text.trim()}
-        <button class="send" type="button" onclick={onstop}>Stop</button>
+      {#if filtering}
+        <!-- A list or a file: the agent is not asked here, so its settings and Send are out; the search's own choice is here. -->
+        <span class="note">{note || ''}</span>
+        {#if searchOption}<Dropdown option={searchOption} onset={onsearch} />{/if}
       {:else}
-        <button class="send" type="submit" disabled={!text.trim()}>{shellMode ? 'Run' : busy ? 'Queue' : 'Send'}</button>
+        <span class="note">{note || (shellMode ? 'Enter to run · ↑ history · Tab on an empty line: back to the agent · Ctrl+C stops' : 'Enter to send · Shift+Enter for a new line')}</span>
+        {#each dropdowns as o (o.key)}
+          <Dropdown option={o} {onset} />
+        {/each}
+        {#if busy && !text.trim()}
+          <button class="send" type="button" onclick={onstop}>Stop</button>
+        {:else}
+          <button class="send" type="submit" disabled={!text.trim()}>{shellMode ? 'Run' : busy ? 'Queue' : 'Send'}</button>
+        {/if}
       {/if}
     </div>
   </form>

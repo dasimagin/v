@@ -190,10 +190,6 @@
   {#if err}<div class="err">{err}</div>{/if}
   <div class="status">
     <span class:dirty>{dirty ? '● unsaved' : note || 'saved'}{#if q}{' '}· {matches.length ? `${cur + 1}/${matches.length}` : 'no matches'}{/if}</span>
-    <span class="seg" role="group" aria-label="How to search">
-      <button class:on={mode === 'regexp'} title="A regular expression (Tab)" onclick={() => (mode = 'regexp')} onmousedown={(e) => e.preventDefault()}>regexp</button>
-      <button class:on={mode === 'fuzzy'} title="The letters in order (Tab)" onclick={() => (mode = 'fuzzy')} onmousedown={(e) => e.preventDefault()}>fuzzy</button>
-    </span>
     <button class="save" disabled={!dirty || busy} onclick={save} title="Save the file">{busy ? 'Saving…' : mod + 'S'}</button>
   </div>
   <div class="scroll" bind:this={scroller}>
@@ -220,10 +216,6 @@
   .ed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .status { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 6px 4px; color: var(--dim); font-size: 12px; }
   .status .dirty { color: var(--accent2); }
-  .seg { display: flex; padding: 2px; margin-left: auto; margin-right: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; font: 12px 'Inter', sans-serif; }
-  .seg button { background: none; border: 0; border-radius: 5px; padding: 0 10px; color: var(--dim); cursor: pointer; }
-  .seg button:hover { color: var(--text); }
-  .seg button.on { background: var(--accent-soft); color: var(--accent); }
   .save { background: var(--accent-soft); color: var(--accent); border: 0; border-radius: 6px; padding: 2px 10px; font: 12px var(--mono); cursor: pointer; }
   .save:disabled { opacity: 0.45; cursor: default; }
   .err { margin: 4px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--c-deleted) 45%, var(--line)); border-radius: 6px; color: var(--c-deleted); font-size: 12.5px; }

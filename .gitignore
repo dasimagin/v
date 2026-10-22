@@ -7,3 +7,6 @@
 .idea/
 .vscode/
 *.swp
+
+# Node modules for the UI experiment
+/ui/node_modules/

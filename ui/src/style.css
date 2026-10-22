@@ -1,0 +1,86 @@
+/* Inter, variable weight; only the Latin and Cyrillic subsets are shipped. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../node_modules/@fontsource-variable/inter/files/inter-cyrillic-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+/* Flat and quiet: one calm accent, hairline borders, no shadows. */
+:root {
+  /* The theme sets these five (see theme.js); the defaults are One Dark Pro. */
+  --bg: #21252b;
+  --panel: #282c34;
+  --strong: #d7dae0;
+  --dim: #6b7380;
+  --accent: #61afef;
+  --accent2: #a988e2;
+  /* Syntax colors; a theme overrides them (theme.js). */
+  --c-keyword: #c678dd; --c-func: #61afef; --c-string: #98c379; --c-number: #d19a66; --c-type: #e5c07b;
+  --c-constant: #d19a66; --c-comment: #5c6370; --c-operator: #56b6c2; --c-variable: #e06c75; --c-builtin: #56b6c2;
+  --c-tag: #e06c75; --c-attr: #d19a66; --c-escape: #56b6c2; --c-added: #98c379; --c-deleted: #e06c75;
+
+  /* Everything else is mixed from them, so any theme works. */
+  --text: color-mix(in srgb, var(--strong) 82%, var(--bg));
+  --raised: color-mix(in srgb, var(--panel) 92%, var(--strong));
+  --line: color-mix(in srgb, var(--bg) 86%, var(--strong));
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --radius: 8px;
+  --omni: var(--col); /* the omnibox, the chat and the settings share the content's width */
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; /* code and paths; its ligatures (=> != ->) are on */
+  --col: min(1500px, 100%); /* the width of the content and of the omnibox: the window, up to a cap */
+  --divider: color-mix(in srgb, var(--accent) 38%, var(--line)); /* between sub-frames */
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The logo is inline, so it follows the theme, not the system. */
+:root[data-mode='light'] .on-dark { display: none; }
+:root[data-mode='light'] .on-light { display: inline; }
+
+/* Syntax colors: the theme sets --c-<class>; plain text uses the main color. */
+.t-keyword { color: var(--c-keyword); }
+.t-func { color: var(--c-func); }
+.t-string { color: var(--c-string); }
+.t-number { color: var(--c-number); }
+.t-type { color: var(--c-type); }
+.t-constant { color: var(--c-constant); }
+.t-comment { color: var(--c-comment); font-style: italic; }
+.t-operator { color: var(--c-operator); }
+.t-variable { color: var(--c-variable); }
+.t-builtin { color: var(--c-builtin); }
+.t-tag { color: var(--c-tag); }
+.t-attr { color: var(--c-attr); }
+.t-escape { color: var(--c-escape); }
+.t-added { color: var(--c-added); }
+.t-deleted { color: var(--c-deleted); }
+
+code, pre, .code, .t { font-variant-ligatures: contextual common-ligatures; font-feature-settings: 'calt' 1, 'liga' 1; }
+
+/* Everything still scrolls (wheel, trackpad, keys); the bars are not drawn anywhere. */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }

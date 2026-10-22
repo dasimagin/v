@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 252 228" width="252" height="228">
+  <defs>
+    <linearGradient id="f" x1="0" y1="0" x2=".7" y2=".7" spreadMethod="repeat">
+      <stop offset="0" stop-color="#61afef"/><stop offset=".25" stop-color="#56d6e0"/><stop offset=".5" stop-color="#98e379"/>
+      <stop offset=".72" stop-color="#e5c07b"/><stop offset=".88" stop-color="#e06cdd"/><stop offset="1" stop-color="#61afef"/>
+      <animate attributeName="x1" values="0;.7" dur="6s" repeatCount="indefinite"/><animate attributeName="y1" values="0;.7" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values=".7;1.4" dur="6s" repeatCount="indefinite"/><animate attributeName="y2" values=".7;1.4" dur="6s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="d" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#fff" flood-opacity=".35"/></filter>
+  </defs>
+  <g filter="url(#d)"><path d="M8 6 H52 L96 112 L140 6 H184 L118 168 H74 Z" fill="url(#f)"/><path d="M8 6 H52 L96 112 L140 6 H184 L118 168 H74 Z" fill="url(#s)"/></g>
+</svg>

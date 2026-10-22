@@ -247,3 +247,24 @@ func TestOldCodexSettingsAreIgnored(t *testing.T) {
 		t.Errorf("label = %q", got)
 	}
 }
+
+func TestOldReviewAndApplyModesBecomeOne(t *testing.T) {
+	for _, c := range []struct{ file, want string }{
+		{`{"review_mode":"auto","apply_mode":"manual"}`, reviewManual},
+		{`{"review_mode":"auto","apply_mode":"auto"}`, reviewAuto},
+		{`{"mode":"auto","apply_mode":"manual"}`, reviewAuto},
+		{`{}`, reviewAuto},
+	} {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		if err := os.MkdirAll(filepath.Join(home, ".v"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, ".v", "settings.json"), []byte(c.file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := loadSettings(); s.Mode != c.want {
+			t.Errorf("%s: mode %q, want %q", c.file, s.Mode, c.want)
+		}
+	}
+}

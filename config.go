@@ -130,32 +130,17 @@ var options = []option{
 		},
 	},
 	{
-		label:  "Review mode (experimental)",
-		desc:   "/review: manual asks about each comment; auto sends them at once as a pending review you publish later",
+		label:  "Mode (experimental)",
+		desc:   "/review and /apply: manual asks about each comment, edit, commit, push and reply; auto lets the agents do it all on their own (comments wait in your pending review)",
 		values: func(*model) []string { return []string{"Manual", "Auto"} },
 		get: func(m *model) int {
-			if m.settings.ReviewMode == reviewAuto {
+			if m.settings.Mode == reviewAuto {
 				return 1
 			}
 			return 0
 		},
 		set: func(m *model, i int) error {
-			m.settings.ReviewMode = []string{reviewManual, reviewAuto}[i]
-			return nil
-		},
-	},
-	{
-		label:  "Apply mode (experimental)",
-		desc:   "/apply: manual asks about every edit, commit, push and reply; auto lets the agent do all of it on its own",
-		values: func(*model) []string { return []string{"Manual", "Auto"} },
-		get: func(m *model) int {
-			if m.settings.ApplyMode == reviewAuto {
-				return 1
-			}
-			return 0
-		},
-		set: func(m *model, i int) error {
-			m.settings.ApplyMode = []string{reviewManual, reviewAuto}[i]
+			m.settings.Mode = []string{reviewManual, reviewAuto}[i]
 			return nil
 		},
 	},

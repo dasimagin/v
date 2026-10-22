@@ -653,7 +653,12 @@ func (m model) View() string {
 }
 
 func main() {
-	dir, file, argErr := startupPaths(os.Args[1:], os.Stderr)
+	args, gui := takeFlag(os.Args[1:], "--ui")
+	if gui {
+		runUI(args)
+		return
+	}
+	dir, file, argErr := startupPaths(args, os.Stderr)
 	if errors.Is(argErr, flag.ErrHelp) {
 		return
 	}

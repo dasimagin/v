@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
-  <style>.on-dark{stroke-opacity:.6}.on-light{display:none}@media (prefers-color-scheme: light){.on-dark{display:none}.on-light{display:inline}}</style>
+  <style>.on-light{display:none}</style>
   <g fill="#61afef"><rect x="0" y="0" width="12.5" height="24.5"/><rect x="12" y="0" width="12.5" height="24.5"/><rect x="156" y="0" width="12.5" height="24.5"/><rect x="168" y="0" width="12.5" height="24.5"/></g>
   <path class="on-dark" fill="none" stroke="#61afef" stroke-width="1.8" d="M24 9.5 L32.5 9.5 L32.5 24 M24 14.5 L27.5 14.5 L27.5 24 M180 9.5 L188.5 9.5 L188.5 24 M180 14.5 L183.5 14.5 L183.5 24"/>
   <path class="on-light" fill="none" stroke="#3f729b" stroke-width="1.8" d="M24 9.5 L32.5 9.5 L32.5 24 M24 14.5 L27.5 14.5 L27.5 24 M180 9.5 L188.5 9.5 L188.5 24 M180 14.5 L183.5 14.5 L183.5 24"/>

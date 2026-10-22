@@ -10,16 +10,17 @@ import (
 
 // Settings is the user config in ~/.v/settings.json.
 type Settings struct {
-	Theme  string `json:"theme"`
-	Model  string `json:"model"`  // Claude Code --model
-	Effort string `json:"effort"` // Claude Code --effort
+	Theme    string `json:"theme"`
+	UITheme  string `json:"ui_theme"`  // the graphical UI: a theme ID, or "light"
+	UIDetail string `json:"ui_detail"` // how much of the agent's work the chat shows: answer, edit, commands or thinking
+	Model    string `json:"model"`     // Claude Code --model
+	Effort   string `json:"effort"`    // Claude Code --effort
 
-	ApplyMode  string `json:"apply_mode"`          // "manual": ask about every step; "auto": the agent applies, commits, pushes and replies on its own
+	Mode       string `json:"mode"`                // "manual": the agents ask about every step; "auto": they review, apply, commit, push and reply on their own
 	Iterations int    `json:"converge_iterations"` // the most rounds of review and fix that /converge runs
 	Background string `json:"background"`          // "theme" (default), "terminal" (leave it to the terminal) or "sync" (the theme's, also set on the terminal)
 	Animate    bool   `json:"animate"`             // the brand shimmers
 	PRComments string `json:"pr_comments"`         // "pending" (default): comments written on the PR screen wait in your pending review until you submit it; "immediate": they are published at once
-	ReviewMode string `json:"review_mode"`         // "manual": accept each comment; "auto": post at once as a pending review
 
 	DiffBefore int `json:"diff_before"` // lines of context before each change, in every diff
 	DiffAfter  int `json:"diff_after"`  // and after it
@@ -27,7 +28,7 @@ type Settings struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, ReviewMode: "auto", ApplyMode: "auto", PRComments: "pending", Animate: true, Iterations: 5, Background: "theme"}
+	return Settings{Theme: defaultTheme, Model: "claude-opus-5-5", Effort: "high", DiffBefore: 3, DiffAfter: 3, Mode: reviewAuto, PRComments: "pending", Animate: true, Iterations: 5, Background: "theme", UITheme: defaultTheme, UIDetail: "commands"}
 }
 
 // models are the choices for the agent's model, best first.
@@ -74,6 +75,15 @@ func loadSettings() (Settings, error) {
 	}
 	if err := json.Unmarshal(b, &s); err != nil {
 		return defaultSettings(), err
+	}
+	// Before there was one mode, review and apply had one each: manual in either stays manual.
+	var old struct {
+		Mode       string `json:"mode"`
+		ReviewMode string `json:"review_mode"`
+		ApplyMode  string `json:"apply_mode"`
+	}
+	if json.Unmarshal(b, &old) == nil && old.Mode == "" && (old.ReviewMode == reviewManual || old.ApplyMode == reviewManual) {
+		s.Mode = reviewManual
 	}
 	return s, nil
 }
